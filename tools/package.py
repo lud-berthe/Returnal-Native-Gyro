@@ -14,14 +14,13 @@ def main():
         'Returnal/Binaries/Win64/version.dll': (args.build_dir/'loader/Release/version.dll').read_bytes(),
         'Returnal/Binaries/Win64/ReturnalGyro.dll': (args.build_dir/'Release/ReturnalGyro.dll').read_bytes(),
         'Returnal/Binaries/Win64/SDL3.dll': args.sdl_dll.read_bytes(),
-        'ReturnalGyro-Info/README.txt': (ROOT/'INSTALL.txt').read_bytes(),
-        'ReturnalGyro-Info/LICENSES.txt': (ROOT/'LICENSES.txt').read_bytes(),
+        'LICENSES.txt': (ROOT/'LICENSES.txt').read_bytes(),
     }
     dep = next(d for d in json.loads((ROOT/'dependencies.json').read_text())['dependencies'] if d['name']=='SDL')
     if sha(files['Returnal/Binaries/Win64/SDL3.dll']) != dep['runtimeSHA256']:
         raise SystemExit('Unexpected SDL runtime; refusing to package.')
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    archive = args.output_dir/f'ReturnalGyro-{version}-Nexus.zip'
+    archive = args.output_dir/f'ReturnalGyro-{version}.zip'
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for name, data in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(2026,9,17,0,0,0))

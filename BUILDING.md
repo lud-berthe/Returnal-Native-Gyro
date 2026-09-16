@@ -18,7 +18,7 @@ Outputs:
 
 - `build/Release/ReturnalGyro.dll`: native gyro/mixed-input runtime.
 - `build/loader/Release/version.dll`: forwarding loader.
-- `dist/ReturnalGyro-1.0.0-Nexus.zip`: three DLLs plus installation instructions and one consolidated license file. No INI or installer script.
+- `dist/ReturnalGyro-1.0.0.zip`: three DLLs plus LICENSES.txt at the archive root. No INI or installer script.
 - `dist/ReturnalGyro-1.0.0-SHA256.json`: hashes of the archive and payload.
 
 Tests run offline, without launching Returnal or accessing a physical controller. The development toolchain used MSVC 14.44.35207 and Windows SDK 10.0.26100. Byte-identical binaries across different compilers, paths or SDK versions are not promised.
