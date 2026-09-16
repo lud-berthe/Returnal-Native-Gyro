@@ -1,0 +1,33 @@
+{
+  "retrieved": "2026-09-15",
+  "dependencies": [
+    {
+      "name": "SDL",
+      "version": "3.4.16",
+      "license": "zlib",
+      "upstream": "https://github.com/libsdl-org/SDL/releases/tag/release-3.4.16",
+      "verifiedArtifact": "SDL.zip",
+      "sha256": "1a784cb2a5c64d56fe7a62090fe9d242d9865f235e4ea9678f1a6ba4e693e7de",
+      "download": "https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-devel-3.4.16-VC.zip",
+      "runtimeSHA256": "1f98969319302a100931f4385e5918a0bd53ab07773040682d22e7edb54858c0"
+    },
+    {
+      "name": "GamepadMotionHelpers",
+      "version": "f1a76007ec058122a4bb6f19c816c6c0c7b7f12a",
+      "license": "MIT",
+      "upstream": "https://github.com/JibbSmart/GamepadMotionHelpers",
+      "verifiedArtifact": "GamepadMotion.hpp",
+      "sha256": "f070bb1327cf5b1fbc336d570382d4c088e5ffae9f031dd0af8f81153581e690",
+      "localPatch": "third_party/patches/GamepadMotion-gravity-initialization.patch",
+      "patchedSHA256": "f1051ad4bfff62a5f473e805d206b371ef96cff508f729f8e9e76c7a9fef9c41"
+    },
+    {
+      "name": "MinHook",
+      "version": "1.3.4",
+      "license": "BSD-2-Clause",
+      "upstream": "https://github.com/TsudaKageyu/minhook/releases/tag/v1.3.4",
+      "verifiedArtifact": "minhook.zip",
+      "sha256": "172708123daa0c98d20d3a980b16a50be14af243dc95dee6f79c24193ad010e4"
+    }
+  ]
+}

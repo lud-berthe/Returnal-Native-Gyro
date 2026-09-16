@@ -1,0 +1,15 @@
+/build*/
+/_deps/
+/dist/
+/research/
+*.log
+*.pdb
+*.ilk
+*.dll
+*.exe
+*.lib
+*.obj
+*.zip
+__pycache__/
+.vs/
+*.user

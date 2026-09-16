@@ -1,0 +1,19 @@
+LIBRARY version
+EXPORTS
+    GetFileVersionInfoA=rg_GetFileVersionInfoA @1
+    GetFileVersionInfoByHandle=rg_GetFileVersionInfoByHandle @2
+    GetFileVersionInfoExA=rg_GetFileVersionInfoExA @3
+    GetFileVersionInfoExW=rg_GetFileVersionInfoExW @4
+    GetFileVersionInfoSizeA=rg_GetFileVersionInfoSizeA @5
+    GetFileVersionInfoSizeExA=rg_GetFileVersionInfoSizeExA @6
+    GetFileVersionInfoSizeExW=rg_GetFileVersionInfoSizeExW @7
+    GetFileVersionInfoSizeW=rg_GetFileVersionInfoSizeW @8
+    GetFileVersionInfoW=rg_GetFileVersionInfoW @9
+    VerFindFileA=rg_VerFindFileA @10
+    VerFindFileW=rg_VerFindFileW @11
+    VerInstallFileA=rg_VerInstallFileA @12
+    VerInstallFileW=rg_VerInstallFileW @13
+    VerLanguageNameA=rg_VerLanguageNameA @14
+    VerLanguageNameW=rg_VerLanguageNameW @15
+    VerQueryValueA=rg_VerQueryValueA @16
+    VerQueryValueW=rg_VerQueryValueW @17
