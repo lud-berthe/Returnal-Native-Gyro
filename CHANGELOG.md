@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Fix the gyro button blocking hold-to-scan prompts: discovery uses its own selected target and the game's current Discover button mapping.
+- Preserve timed pickup and interaction holds when the native Hold to interact setting is selected, including interactions not marked as mandatory holds.
+- Retain immediate gyro control, the 200 ms short-tap rule outside hold interactions, and the game's Press/Instant interaction settings.
+
 ## 1.0.1
 
 - Fix Aim Only gyro for Alt-Fire assigned to a separate button by reading the current player's native Alt-Fire input request alongside trigger commands.

@@ -55,10 +55,10 @@ struct Bindings {
     Unary local{},paused{},lookIgnored{},altActive{};
     bool(*cinematic)(Object,bool){};Object(*viewTarget)(Object){};
     bool(*gamepadKey)(const void*){};
-    Object pcClass{},pawnClass{},saveClass{},altClass{},aimFunction{},focusClass{},interactionClass{};
-    Object(*focusedInteractable)(Object){};bool(*interactionHoldRequired)(Object,Object){};
+    Object pcClass{},pawnClass{},saveClass{},altClass{},aimFunction{},focusClass{},interactionClass{},discoverableClass{};
+    Object(*focusedInteractable)(Object){};Object(*currentDiscoverable)(Object){};bool(*interactionHoldRequired)(Object,Object){};float(*interactionDelay)(Object,Object){};
     bool(*secondaryInteractionAllowed)(Object){};bool(*secondaryIntercepting)(Object){};Object(*keysForAction)(Object,Name){};
-    Name interactAction{},secondaryInteractAction{};int playerInput{};
+    Name interactAction{},secondaryInteractAction{},discoverAction{};int playerInput{},riskyInteract{};
     Object(*getTriggerState)(Object,int){};int focusOwner{},focusPlayer{},altRequestOffset{};
     Object altRequestProperty{};Unary altInTrigger{};
     Object screenProperty{},controllerProperty{};
@@ -83,10 +83,12 @@ void initializeReflection(){
     b.focusOwner=b.fieldOffset(b.focusClass,L"OwnerPlayerController",360);
     b.focusPlayer=b.fieldOffset(b.focusClass,L"OwnerPlayer",352);
     b.interactionClass=symbol<Object(*)()>(game,"?GetPrivateStaticClass@UInteractionManagerComponent@@CAPEAVUClass@@XZ")();
+    b.discoverableClass=symbol<Object(*)()>(game,"?GetPrivateStaticClass@UDiscoverableComponent@@CAPEAVUClass@@XZ")();
     b.playerInput=b.fieldOffset(b.pcClass,L"PlayerInput",1064);
-    b.interactAction=b.name(L"Interact");b.secondaryInteractAction=b.name(L"SecondaryInteract");
+    b.interactAction=b.name(L"Interact");b.secondaryInteractAction=b.name(L"SecondaryInteract");b.discoverAction=b.name(L"Discover");
     b.pawn=b.fieldOffset(b.pcClass,L"Pawn",816);b.follow=b.fieldOffset(b.pawnClass,L"FollowCameraActor",3824);
     b.save=b.fieldOffset(b.pcClass,L"TouristSaveInstance",1792);b.control=b.fieldOffset(b.pcClass,L"ControlRotation",872);
+    b.riskyInteract=b.fieldOffset(b.saveClass,L"RiskyInteract",414);
     b.screen=b.fieldOffset(b.pcClass,L"bIsInScreenspace",1914);b.screenProperty=b.field(b.pcClass,L"bIsInScreenspace");
     b.controller=b.fieldOffset(b.saveClass,L"bIsControllerUsed",2169);b.controllerProperty=b.field(b.saveClass,L"bIsControllerUsed");
     b.aimFunction=b.findFunction(b.pawnClass,b.name(L"IsAiming"),0);
@@ -192,12 +194,25 @@ bool nativeInteractionHold(Object pc,Bindings::Name key){
     auto input=read<Object>(pc,b.playerInput);if(!input)return false;
     bool primary=actionUsesKey(input,b.interactAction,key);
     bool secondary=actionUsesKey(input,b.secondaryInteractAction,key);
-    if(!primary&&!secondary)return false;
+    bool discovery=actionUsesKey(input,b.discoverAction,key);
+    if(!primary&&!secondary&&!discovery)return false;
     auto pawn=read<Object>(pc,b.pawn);if(!b.is(pawn,b.pawnClass))return false;
     auto manager=b.getComponent(pawn,b.interactionClass);if(!manager)return false;
+    // Discovery has its own native action and target; GetFocusedInteractable is
+    // deliberately empty while an undiscovered item is selected. Observe the
+    // same target as LocalDoDiscover, without starting/completing discovery.
+    if(discovery&&b.is(b.currentDiscoverable(manager),b.discoverableClass))return true;
+    if(!primary&&!secondary)return false;
     auto focused=b.focusedInteractable(manager);if(!focused)return false;
     if(!primary&&(!b.secondaryIntercepting(manager)||!b.secondaryInteractionAllowed(focused)))return false;
-    return b.interactionHoldRequired(focused,pc);
+    if(b.interactionHoldRequired(focused,pc))return true;
+    // Optional delayed interactions also need their full press cycle in the
+    // native HoldToInteract preference (EInteractType=0). Press/instant modes
+    // do not require this extra exception. Query, never change, the preference.
+    auto save=read<Object>(pc,b.save);
+    if(!b.is(save,b.saveClass)||read<unsigned char>(save,b.riskyInteract)!=0)return false;
+    const float delay=b.interactionDelay(focused,pc);
+    return std::isfinite(delay)&&delay>0.f;
 }
 using KeyInput=bool(*)(Object,const void*,int,float,bool);
 KeyInput originalKey{};
@@ -349,7 +364,9 @@ bool installBindings(Runtime& r){
     b.findFunction=symbol<decltype(b.findFunction)>(objects,"?FindFunctionByName@UClass@@QEBAPEAVUFunction@@VFName@@W4Type@EIncludeSuperFlag@@@Z");
     b.processEvent=symbol<decltype(b.processEvent)>(objects,"?ProcessEvent@UObject@@UEAAXPEAVUFunction@@PEAX@Z");
     b.focusedInteractable=symbol<decltype(b.focusedInteractable)>(game,"?GetFocusedInteractable@UInteractionManagerComponent@@QEBAPEAVUObject@@XZ");
+    b.currentDiscoverable=symbol<decltype(b.currentDiscoverable)>(game,"?GetDiscoverableComponent@UInteractionManagerComponent@@QEBAPEAVUDiscoverableComponent@@XZ");
     b.interactionHoldRequired=symbol<decltype(b.interactionHoldRequired)>(game,"?Execute_GetInteractionDelayRequired@IInteractable@@SA_NPEAVUObject@@PEAVATouristPlayerController@@@Z");
+    b.interactionDelay=symbol<decltype(b.interactionDelay)>(game,"?Execute_GetInteractionDelay@IInteractable@@SAMPEAVUObject@@PEAVATouristPlayerController@@@Z");
     b.secondaryInteractionAllowed=symbol<decltype(b.secondaryInteractionAllowed)>(game,"?Execute_IsSecondaryInteractionAllowed@IInteractable@@SA_NPEBVUObject@@@Z");
     b.secondaryIntercepting=symbol<decltype(b.secondaryIntercepting)>(game,"?IsSecondaryInteractInterceptingInput@UInteractionManagerComponent@@QEAA_NXZ");
     b.keysForAction=symbol<decltype(b.keysForAction)>(engine,"?GetKeysForAction@UPlayerInput@@QEBAAEBV?$TArray@UFInputActionKeyMapping@@V?$TSizedDefaultAllocator@$0CA@@@@@VFName@@@Z");

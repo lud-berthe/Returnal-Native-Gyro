@@ -1,6 +1,6 @@
 # Returnal Native Gyro + Mixed Input
 
-Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.1**.
+Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.2**.
 
 ## Install
 
@@ -18,7 +18,7 @@ Existing `ReturnalGyro.ini` settings survive updates; defaults are created when 
 
 Only supported control families are shown: buttons, touchpads, capacitive stick/grip contacts and analog stick deflection. Left/right/either/both are available where supported. In automatic activation modes, the selected controls suspend gyro; Hold to Enable and Toggle use them to activate it.
 
-Selected game buttons respond to a tap shorter than 200 ms on release; gyro responds immediately. Native hold interactions keep their full hold. Touch contact and analog deflection are separate from clicks.
+Selected game buttons respond to a tap shorter than 200 ms on release; gyro responds immediately. Native hold interactions, item scans and timed pickups keep their full hold, including remapped interaction buttons. Touch contact and analog deflection are separate from clicks.
 
 ## Features
 
