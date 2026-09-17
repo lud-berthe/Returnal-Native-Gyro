@@ -1,12 +1,12 @@
 # Returnal Native Gyro + Mixed Input
 
-Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.0**.
+Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.1**.
 
 ## Install
 
 Close Returnal. Extract the Nexus archive into the game installation folder, merging its `Returnal` folder. `version.dll`, `ReturnalGyro.dll` and `SDL3.dll` must be beside `Returnal-Win64-Shipping.exe` in `Returnal/Binaries/Win64`. Do not overwrite DLLs belonging to another mod.
 
-Open **Settings > Controls > Gyro Configuration**. Default: gyro enabled, **Aim Only**, Player Space, X/Y sensitivity 2.50. Hold aim to test it. Flick Stick is off by default (150 ms spin duration).
+Open **Settings > Controls > Gyro Configuration**. Default: gyro enabled, **Aim Only**, Player Space, X/Y sensitivity 2.50. Hold aim to test it. Aim Only also includes Alt-Fire preparation/firing, even when assigned to a separate button; Hip-fire Only excludes both. Flick Stick is off by default (150 ms spin duration).
 
 Existing `ReturnalGyro.ini` settings survive updates; defaults are created when no INI exists. To uninstall, close the game and remove only the three mod DLLs. Keep the INI to retain settings.
 

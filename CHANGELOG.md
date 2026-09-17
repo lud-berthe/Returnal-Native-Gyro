@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Fix Aim Only gyro for Alt-Fire assigned to a separate button by reading the current player's native Alt-Fire input request alongside trigger commands.
+- Hip-fire Only and Flick Stick's outside-aim mode use the same input state. Releasing hold-to-aim/Alt-Fire takes effect before exit animations finish; the game's toggle behavior is respected.
+- Observe the game's controls without changing button mappings or triggering aim/Alt-Fire actions. Ordinary hip fire does not enable Aim Only gyro.
+- Add regression coverage for independent Alt-Fire press/release, missing trigger data, aim handoffs, sensitivity multipliers, gameplay guards and queued camera motion.
+
 ## 1.0.0
 
 - First public release packaging and minimal source distribution.

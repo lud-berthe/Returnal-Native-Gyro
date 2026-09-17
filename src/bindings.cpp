@@ -59,7 +59,8 @@ struct Bindings {
     Object(*focusedInteractable)(Object){};bool(*interactionHoldRequired)(Object,Object){};
     bool(*secondaryInteractionAllowed)(Object){};bool(*secondaryIntercepting)(Object){};Object(*keysForAction)(Object,Name){};
     Name interactAction{},secondaryInteractAction{};int playerInput{};
-    Object(*getTriggerState)(Object,int){};int focusOwner{},focusPlayer{};
+    Object(*getTriggerState)(Object,int){};int focusOwner{},focusPlayer{},altRequestOffset{};
+    Object altRequestProperty{};Unary altInTrigger{};
     Object screenProperty{},controllerProperty{};
     int pawn{},follow{},save{},screen{},controller{},control{};
     const void *mouseX{},*mouseY{},*rightX{},*rightY{};
@@ -77,6 +78,8 @@ void initializeReflection(){
     b.saveClass=symbol<Object(*)()>(game,"?GetPrivateStaticClass@UTouristSaveGame@@CAPEAVUClass@@XZ")();
     b.altClass=symbol<Object(*)()>(game,"?StaticClass@UAltFireComponent@@SAPEAVUClass@@XZ")();
     b.focusClass=symbol<Object(*)()>(game,"?StaticClass@UFocusAimComponent@@SAPEAVUClass@@XZ")();
+    b.altRequestOffset=b.fieldOffset(b.altClass,L"bWantsToAltFireMode",624);
+    b.altRequestProperty=b.field(b.altClass,L"bWantsToAltFireMode");
     b.focusOwner=b.fieldOffset(b.focusClass,L"OwnerPlayerController",360);
     b.focusPlayer=b.fieldOffset(b.focusClass,L"OwnerPlayer",352);
     b.interactionClass=symbol<Object(*)()>(game,"?GetPrivateStaticClass@UInteractionManagerComponent@@CAPEAVUClass@@XZ")();
@@ -227,7 +230,7 @@ bool inputKey(Object pc,const void* key,int event,float amount,bool gamepad){
  b.destroyKey(const_cast<void*>(key));return true;
 }
 using AimTriggerChanged=void(*)(Object,int);
-AimTriggerChanged originalAimTrigger{};Object aimOwner{},aimPawn{};int aimIndex{-1};int lastAimFlags{-1};
+AimTriggerChanged originalAimTrigger{};Object aimOwner{},aimPawn{};int aimIndex{-1};
 void aimTriggerChanged(Object component,int index){
  originalAimTrigger(component,index);
  if(reflectionReady.load(std::memory_order_acquire)&&b.is(component,b.focusClass)){
@@ -236,15 +239,31 @@ void aimTriggerChanged(Object component,int index){
  }
 }
 std::optional<unsigned> currentAimInput(Object pc,GameplayState animated){
- if(aimOwner==pc&&aimPawn==read<Object>(pc,b.pawn)&&b.is(aimPawn,b.pawnClass)){
-  auto state=b.getTriggerState(aimPawn,aimIndex);
-  if(state){
-   unsigned flags=read<unsigned char>(state,14);
-   if(static_cast<int>(flags)!=lastAimFlags){lastAimFlags=static_cast<int>(flags);runtime->log("Aim command flags="+std::to_string(flags)+" animatedAim="+std::to_string(animated.aiming)+" animatedAlt="+std::to_string(animated.altFire));}
-   return flags;
-  }
+ auto pawn=read<Object>(pc,b.pawn);
+ if(!b.is(pawn,b.pawnClass))return {};
+ std::optional<unsigned> trigger;
+ if(aimOwner==pc&&aimPawn==pawn){
+  if(auto state=b.getTriggerState(pawn,aimIndex))trigger=read<unsigned char>(state,14);
  }
- return {}; // Never infer a held aim command from the firing/animation state.
+ std::optional<bool> buttonRequest;
+ if(auto component=b.getComponent(pawn,b.altClass);b.is(component,b.altClass)&&!b.altInTrigger(component)){
+  // The game's separate AltFire action sets this input intent on press and clears
+  // it on release (or the next press in native toggle mode), before animations.
+  // Read the current pawn directly: no remembered callback/held state can go stale.
+  buttonRequest=b.boolValue(b.altRequestProperty,static_cast<std::byte*>(component)+b.altRequestOffset);
+ }
+ auto combined=combinedAimCommands(trigger,buttonRequest);
+ // Include source changes even if their combined eligibility remains identical.
+ static int lastSources=-1;
+ int sourceState=(trigger?static_cast<int>(*trigger):256)|(buttonRequest?(buttonRequest.value()?1024:512):0);
+ if(sourceState!=lastSources){
+  lastSources=sourceState;
+  runtime->log("Aim input trigger="+(trigger?std::to_string(*trigger):"unavailable")+
+    " separateAlt="+(buttonRequest?(buttonRequest.value()?std::string("held"):std::string("released")):std::string("unavailable"))+
+    " combined="+(combined?std::to_string(*combined):"unavailable")+
+    " animatedAim="+std::to_string(animated.aiming)+" animatedAlt="+std::to_string(animated.altFire));
+ }
+ return combined;
 }
 GameplayState flickGameplay(Object pc,GameplayState animated){
  if(auto flags=currentAimInput(pc,animated))return flickGameplayForTrigger(animated,*flags);
@@ -339,6 +358,7 @@ bool installBindings(Runtime& r){
     b.paused=symbol<Bindings::Unary>(engine,"?IsPaused@APlayerController@@QEBA_NXZ");
     b.lookIgnored=symbol<Bindings::Unary>(engine,"?IsLookInputIgnored@AController@@UEBA_NXZ");
     b.altActive=symbol<Bindings::Unary>(game,"?IsAltFireModeActive@UAltFireComponent@@QEBA_NXZ");
+    b.altInTrigger=symbol<Bindings::Unary>(game,"?IsAltFireInTrigger@UAltFireComponent@@QEBA_NXZ");
     b.cinematic=symbol<decltype(b.cinematic)>(game,"?IsInCinematicMode@ATouristPlayerController@@QEBA_N_N@Z");
     b.viewTarget=symbol<decltype(b.viewTarget)>(engine,"?GetViewTarget@APlayerController@@UEBAPEAVAActor@@XZ");
     b.gamepadKey=symbol<decltype(b.gamepadKey)>(input,"?IsGamepadKey@FKey@@QEBA_NXZ");
