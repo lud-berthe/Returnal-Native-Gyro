@@ -1,11 +1,12 @@
 #pragma once
 #include "motion.hpp"
 #include "controller_buttons.hpp"
+#include "controller_presentation.hpp"
 #include <memory>
 #include <optional>
 #include <string>
 namespace rg {
-struct DeviceInfo {std::string name,path; unsigned vendor{},product{};bool bluetooth{},factoryCalibration{};ControllerLayout layout{ControllerLayout::Generic};bool touchpad{};bool connectionKnown{true};bool externalCalibration{};std::uint32_t availableButtons{standardGyroButtons};};
+struct DeviceInfo {std::string name,path; unsigned vendor{},product{};bool bluetooth{},factoryCalibration{};ControllerLayout layout{ControllerLayout::Generic};bool touchpad{};bool connectionKnown{true};bool externalCalibration{};std::uint32_t availableButtons{standardGyroButtons};ControllerDiagram diagram{ControllerDiagram::Native};};
 std::uint64_t monotonicNs();
 class MotionBackend {
 public:
@@ -20,4 +21,5 @@ std::unique_ptr<MotionBackend> makeSonyPassiveBackend();
 std::unique_ptr<MotionBackend> makeSdlBackend();
 std::unique_ptr<MotionBackend> makeSteamBackend();
 std::unique_ptr<MotionBackend> makeMotionBackend(int mode);
+std::optional<ControllerPresentation> steamPresentation(int index);
 }

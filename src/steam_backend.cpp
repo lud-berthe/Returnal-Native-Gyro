@@ -52,9 +52,9 @@ public:
   handle_=selected;const char* name=SDL_GetGamepadName(pad_);int type=api.type(handle_);inputType_=type;
   info_={std::string(name?name:"Controller")+" [Steam Input]","steam:"+std::to_string(handle_),SDL_GetGamepadVendor(pad_),SDL_GetGamepadProduct(pad_),false,false};
   if(fallback){info_.name="Controller [Steam Input, verified XInput slot "+std::to_string(slot)+"]";info_.vendor=info_.product=0;}
-  info_.layout=(type==5||type==13)?ControllerLayout::Sony:(type==8||type==9||type==10||type==16)?ControllerLayout::Nintendo:ControllerLayout::Xbox;
-  if(steamContactDevice(info_.vendor,info_.product)||type==1||type==18)info_.layout=ControllerLayout::Steam;
+  auto presentation=resolveSteamPresentation(type,info_.vendor,info_.product,sdlControllerPresentation(pad_),!fallback);info_.layout=presentation.layout;info_.diagram=presentation.diagram;
   contactProduct_=steamContactDevice(info_.vendor,info_.product)?info_.product:0;
+  info_.name+=" type="+std::to_string(type)+" layout="+std::to_string(static_cast<int>(info_.layout))+" diagram="+std::to_string(static_cast<int>(info_.diagram))+" exactAssociation="+std::to_string(!fallback);
   info_.availableButtons=sdlAvailableButtons(pad_);if(steamFirstGeneration(info_.product))info_.availableButtons&=~(buttonMask(4)|buttonMask(30));info_.touchpad=(info_.availableButtons&buttonMask(5))!=0;info_.connectionKnown=false;info_.externalCalibration=true;
   lastPoll_=0;lastValid_=monotonicNs();error_.clear();return true;
  }
@@ -86,6 +86,16 @@ public:
  DeviceInfo info()const override{return info_;}
  std::string error()const override{return error_;}
 };
+}
+std::optional<ControllerPresentation> steamPresentation(int index){
+ auto& api=steam();if(!api.initialize())return {};api.update();
+ std::array<std::uint64_t,16> handles{};int n=api.controllers(handles.data());if(n<0||n>16)return {};
+ std::vector<std::uint64_t> candidates;for(int i=0;i<n;++i)if(handles[i])candidates.push_back(handles[i]);
+ std::sort(candidates.begin(),candidates.end(),[&](auto a,auto b){int sa=api.slot(a),sb=api.slot(b);if(sa<0)sa=16;if(sb<0)sb=16;return sa!=sb?sa<sb:a<b;});
+ if(index<0||static_cast<size_t>(index)>=candidates.size())return {};
+ auto presentation=steamControllerPresentation(api.type(candidates[index]));
+ if(presentation.layout==ControllerLayout::Generic)return {};
+ return presentation;
 }
 std::unique_ptr<MotionBackend> makeSteamBackend(){return std::make_unique<SteamBackend>();}
 }

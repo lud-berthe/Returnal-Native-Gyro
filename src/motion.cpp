@@ -1,11 +1,12 @@
 #include "rg/motion.hpp"
 #include "rg/controller_buttons.hpp"
 #include "rg/aim_gate.hpp"
+#include "rg/calibration_policy.hpp"
 #include <algorithm>
 namespace rg {
 static bool finite(Vec3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
-void MotionProcessor::clearSmoothing(){smoothHead_=smoothCount_=0;smoothTime_=0;smoothIntegral_={};}
-void MotionProcessor::resetDevice(){gravityInitialized_=false;motion_.Reset();motion_.ResetContinuousCalibration();motion_.PauseContinuousCalibration();diagnostics_={};previousNs_=0;primed_=false;previousButton_=false;toggled_=true;wasActive_=false;previousActivationMode_=-1;previousSmoothing_=-1;calibrationTime_=0;calibrationCount_=0;calibrationMean_={};calibrationM2_={};clearSmoothing();}
+void MotionProcessor::clearSmoothing(){filteredVelocity_={};}
+void MotionProcessor::resetDevice(){gravityInitialized_=false;motion_.Reset();motion_.ResetContinuousCalibration();motion_.PauseContinuousCalibration();diagnostics_={};previousNs_=0;primed_=false;previousButton_=false;toggled_=true;wasActive_=false;previousActivationMode_=-1;previousGyroSpace_=-1;calibrationTime_=0;calibrationCount_=0;calibrationMean_={};calibrationM2_={};clearSmoothing();}
 void MotionProcessor::resumeDevice(){
     // Preserve fusion, calibration ownership and toggle state, but never replay
     // missing motion or a held-button transition from the disconnected interval.
@@ -16,27 +17,21 @@ void MotionProcessor::beginCalibration(){if(externalCalibration_)return;diagnost
 void MotionProcessor::resetCalibration(){if(externalCalibration_)return;motion_.ResetContinuousCalibration();motion_.PauseContinuousCalibration();diagnostics_.bias={};diagnostics_.calibration=CalibrationState::Idle;clearSmoothing();}
 void MotionProcessor::setBias(Vec3 bias){if(externalCalibration_)return;motion_.SetCalibrationOffset(bias.x,bias.y,bias.z,1);diagnostics_.bias=bias;}
 CameraDelta MotionProcessor::smooth(CameraDelta v,double dt,const Settings& s) {
-    double speed=std::hypot(v.yawDegrees,v.pitchDegrees);
-    double immediate=std::clamp((speed-s.SmoothingThresholdDps*0.5)/(s.SmoothingThresholdDps*0.5),0.0,1.0);
-    CameraDelta delayed{v.yawDegrees*(1-immediate),v.pitchDegrees*(1-immediate)};
-    if(smoothCount_==smoothing_.size())clearSmoothing(); // bounded; validated minimum window prevents normal overflow
-    smoothing_[(smoothHead_+smoothCount_)%smoothing_.size()]={dt,delayed};++smoothCount_;
-    smoothTime_+=dt;smoothIntegral_.yawDegrees+=delayed.yawDegrees*dt;smoothIntegral_.pitchDegrees+=delayed.pitchDegrees*dt;
-    while(smoothCount_&&smoothTime_>s.SmoothingSeconds) {
-        auto& oldest=smoothing_[smoothHead_];double trim=std::min(oldest.duration,smoothTime_-s.SmoothingSeconds);
-        smoothTime_-=trim;oldest.duration-=trim;
-        smoothIntegral_.yawDegrees-=oldest.velocity.yawDegrees*trim;smoothIntegral_.pitchDegrees-=oldest.velocity.pitchDegrees*trim;
-        if(oldest.duration<1e-12){smoothHead_=(smoothHead_+1)%smoothing_.size();--smoothCount_;}
-    }
-    // Treat missing history as zero. Never replay history after ratcheting or losing gameplay control.
-    return {v.yawDegrees*immediate+smoothIntegral_.yawDegrees/s.SmoothingSeconds,
-            v.pitchDegrees*immediate+smoothIntegral_.pitchDegrees/s.SmoothingSeconds};
+    const double tau=std::clamp(s.Smoothing,0,500)/1000.0;
+    if(tau>0){
+        const double alpha=-std::expm1(-dt/tau);
+        filteredVelocity_.yawDegrees+=alpha*(v.yawDegrees-filteredVelocity_.yawDegrees);
+        filteredVelocity_.pitchDegrees+=alpha*(v.pitchDegrees-filteredVelocity_.pitchDegrees);
+    }else filteredVelocity_=v;
+    return filteredVelocity_;
 }
+
 CameraDelta MotionProcessor::process(const GyroSample& sample,const Settings& configured,GameplayState game) {
-    Settings s=configured;
-    constexpr float windows[]={0,0.02f,0.04f,0.08f},thresholds[]={0,1,2,4};
-    int smoothing=std::clamp(s.Smoothing,0,3);if(previousSmoothing_!=smoothing){clearSmoothing();previousSmoothing_=smoothing;}s.SmoothingSeconds=windows[smoothing];s.SmoothingThresholdDps=thresholds[smoothing];
-    diagnostics_.raw=sample.degreesPerSecond;diagnostics_.delta={};diagnostics_.active=false;
+    const Settings& s=configured;
+    // Keep the filtered velocity when only tau changes. A space change alters
+    // the axis basis, so values from the old space cannot be carried across.
+    if(previousGyroSpace_!=s.GyroSpace){clearSmoothing();previousGyroSpace_=s.GyroSpace;}
+    diagnostics_.calibrationEvent=CalibrationEvent::None;diagnostics_.raw=sample.degreesPerSecond;diagnostics_.delta={};diagnostics_.active=false;
     if(!finite(sample.degreesPerSecond)||!finite(sample.accelG)){++diagnostics_.discarded;return {};}
     if(!gravityInitialized_){
         gravityInitialized_=motion_.InitializeGravityFromAcceleration(sample.accelG.x,sample.accelG.y,sample.accelG.z);
@@ -47,13 +42,23 @@ CameraDelta MotionProcessor::process(const GyroSample& sample,const Settings& co
     double dt=static_cast<double>(sample.sensorNs-previousNs_)*1e-9;previousNs_=sample.sensorNs;
     if(dt>0.1){clearSmoothing();wasActive_=false;++diagnostics_.discarded;return {};}
     ++diagnostics_.samples;diagnostics_.sensorHz=1.0/dt;
-    auto calibrationMode=(!externalCalibration_&&s.AutomaticCalibration)?GamepadMotionHelpers::CalibrationMode::Stillness|GamepadMotionHelpers::CalibrationMode::SensorFusion:GamepadMotionHelpers::CalibrationMode::Manual;
+    auto calibrationMode=GamepadMotionHelpers::CalibrationMode::Manual;
+    if(automaticCalibrationAllowed(s.AutomaticCalibration,game.menuOpen,externalCalibration_)){
+        // Menu-only calibration requires stillness; the anytime mode retains the
+        // previous hybrid behavior. Switching modes preserves bias and gravity.
+        calibrationMode=GamepadMotionHelpers::CalibrationMode::Stillness;
+        if(s.AutomaticCalibration==1)calibrationMode=calibrationMode|GamepadMotionHelpers::CalibrationMode::SensorFusion;
+    }
     if(diagnostics_.calibration==CalibrationState::Collecting)calibrationMode=GamepadMotionHelpers::CalibrationMode::Manual;
     motion_.SetCalibrationMode(calibrationMode);
     motion_.ProcessMotion(sample.degreesPerSecond.x,sample.degreesPerSecond.y,sample.degreesPerSecond.z,sample.accelG.x,sample.accelG.y,sample.accelG.z,static_cast<float>(dt));
     motion_.GetGravity(diagnostics_.gravity.x,diagnostics_.gravity.y,diagnostics_.gravity.z);
     motion_.GetCalibratedGyro(diagnostics_.calibrated.x,diagnostics_.calibrated.y,diagnostics_.calibrated.z);
+    const auto previousBias=diagnostics_.bias;
     motion_.GetCalibrationOffset(diagnostics_.bias.x,diagnostics_.bias.y,diagnostics_.bias.z);
+    if(automaticCalibrationAllowed(s.AutomaticCalibration,game.menuOpen,externalCalibration_)&&diagnostics_.calibration!=CalibrationState::Collecting&&
+       (previousBias.x!=diagnostics_.bias.x||previousBias.y!=diagnostics_.bias.y||previousBias.z!=diagnostics_.bias.z))
+        diagnostics_.calibrationEvent=CalibrationEvent::AutomaticCorrection;
     if(diagnostics_.calibration==CalibrationState::Collecting) {
         const auto g=sample.degreesPerSecond;float len=std::sqrt(g.x*g.x+g.y*g.y+g.z*g.z);
         const auto a=sample.accelG;float accel=std::sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
@@ -64,7 +69,7 @@ CameraDelta MotionProcessor::process(const GyroSample& sample,const Settings& co
         update(values[0],calibrationMean_.x,calibrationM2_.x);update(values[1],calibrationMean_.y,calibrationM2_.y);update(values[2],calibrationMean_.z,calibrationM2_.z);
         if(calibrationCount_>20&&(calibrationM2_.x+calibrationM2_.y+calibrationM2_.z)/calibrationCount_>0.05f){beginCalibration();return {};}
         diagnostics_.calibrationProgress=static_cast<float>(calibrationTime_/s.CalibrationSeconds);
-        if(calibrationTime_>=s.CalibrationSeconds&&calibrationCount_>=100){setBias(calibrationMean_);diagnostics_.calibration=CalibrationState::Complete;diagnostics_.calibrationProgress=1;}
+        if(calibrationTime_>=s.CalibrationSeconds&&calibrationCount_>=100){setBias(calibrationMean_);diagnostics_.calibration=CalibrationState::Complete;diagnostics_.calibrationProgress=1;diagnostics_.calibrationEvent=CalibrationEvent::ManualComplete;}
         return {};
     }
     bool held=gyroActivationHeld(sample.buttons,s,sample.leftStickMagnitude,sample.rightStickMagnitude);
@@ -82,7 +87,7 @@ CameraDelta MotionProcessor::process(const GyroSample& sample,const Settings& co
     // SDL/Sony right-handed Y-up -> Unreal positive yaw right and pitch up.
     CameraDelta velocity{-static_cast<double>(yaw),static_cast<double>(pitch)};
     double rawSpeed=std::hypot(velocity.yawDegrees,velocity.pitchDegrees);
-    if(s.Smoothing)velocity=smooth(velocity,dt,s);else clearSmoothing();
+    velocity=smooth(velocity,dt,s);
     double speed=std::hypot(velocity.yawDegrees,velocity.pitchDegrees);
     double gain=s.TighteningDps>0?std::min(speed/s.TighteningDps,1.0):1.0;
     if(s.CutoffDps>0&&speed<s.CutoffDps)gain=0;

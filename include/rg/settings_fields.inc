@@ -1,7 +1,7 @@
 // type, name, default, minimum, maximum, description
 RG_SETTING(bool, GyroEnabled, true, 0, 1, "Enable native angular gyro camera input.")
 RG_SETTING(int, GyroInputMode, 0, 0, 1, "0 Auto; 1 Native. Both require a native sensor; never generates mouse input.")
-RG_SETTING(int, SensorBackend, 0, 0, 3, "0 Auto (Steam Input, Sony HID, SDL); 1 SDL sensors; 2 Steam Input; 3 Sony passive HID only. Restart required. Disable Steam layout gyro output when using native gyro.")
+RG_SETTING(int, SensorBackend, 0, 0, 4, "Legacy value retained for compatibility; runtime chooses the source automatically at launch. Restart Returnal after changing Steam Input. Disable gyro output in the Steam layout.")
 RG_SETTING(int, DeviceIndex, 0, 0, 15, "Motion-device index: Steam gamepad slot/handle order, direct devices by path. Restart to change.")
 RG_SETTING(float, SensitivityX, 2.5f, 0, 10, "Horizontal natural sensitivity: 1 means one camera degree per controller degree.")
 RG_SETTING(float, SensitivityY, 2.5f, 0, 10, "Vertical natural sensitivity, independent of horizontal sensitivity.")
@@ -21,12 +21,12 @@ RG_SETTING(bool, DisableWhileRightStick, false, 0, 1, "Suspend gyro while right-
 RG_SETTING(float, RightStickThreshold, 0.2f, 0, 1, "Normalized deflection threshold for either stick in the GyroStick family.")
 RG_SETTING(bool, InvertX, false, 0, 1, "Invert gyro horizontal direction independently of game controls.")
 RG_SETTING(bool, InvertY, false, 0, 1, "Invert gyro vertical direction independently of game controls.")
-RG_SETTING(bool, AutomaticCalibration, false, 0, 1, "Opt into GamepadMotionHelpers hybrid stillness/sensor-fusion calibration; off preserves slow tracking.")
+RG_SETTING(int, AutomaticCalibration, 0, 0, 2, "0 Off; 1 Anytime (legacy enabled); 2 Menus only while stationary. Steam Input owns its calibration.")
 RG_SETTING(float, CalibrationSeconds, 3.0f, 1, 10, "Manual still-surface calibration duration. Movement restarts collection.")
 RG_SETTING(float, TighteningDps, 0.0f, 0, 20, "Optional continuous precision threshold in deg/s: scales input by min(speed/threshold,1), not a deadzone.")
-RG_SETTING(int, Smoothing, 0, 0, 3, "0 Off; 1 Low; 2 Medium; 3 High. Presets smooth only slow motion.")
-RG_SETTING(float, SmoothingThresholdDps, 2.0f, 0.01, 100, "Fully smooth below half this speed; fully immediate at this speed (deg/s).")
-RG_SETTING(float, SmoothingSeconds, 0.04f, 0.001, 0.25, "Time window for low-speed smoothing, in seconds.")
+RG_SETTING(int, Smoothing, 0, 0, 500, "Exponential smoothing time constant in milliseconds, 0 Off to 500, in steps of 5.")
+RG_SETTING(float, SmoothingThresholdDps, 2.0f, 0.01, 100, "Legacy value, ignored by exponential smoothing.")
+RG_SETTING(float, SmoothingSeconds, 0.04f, 0.001, 0.25, "Legacy value, ignored. Smoothing now sets the time constant in milliseconds.")
 RG_SETTING(float, CutoffDps, 0.0f, 0, 10, "Optional hard angular deadzone. Zero preserves arbitrarily small motion.")
 RG_SETTING(int, Acceleration, 0, 0, 3, "0 Off; 1 Low (up to 1.5x); 2 Medium (2x); 3 High (3x). Multiplies each axis independently.")
 RG_SETTING(float, MinSensitivity, 1.0f, 0, 10, "Natural sensitivity below AccelerationStartDps.")
@@ -42,7 +42,7 @@ RG_SETTING(bool, VerboseSamples, false, 0, 1, "Record per-sample sensor diagnost
 
 RG_SETTING(float, UIScale, 0.0f, 0, 3, "Settings text/control scale: 0 Auto (DPI and resolution), 1 to 3 explicit scale. Auto uses 2x on 4K.")
 
-RG_SETTING(int, ConfigVersion, 3, 1, 3, "Configuration schema version; old activation/ratchet settings are migrated on load.")
+RG_SETTING(int, ConfigVersion, 4, 1, 4, "Configuration schema version; old bindings and smoothing presets are migrated on load.")
 
 RG_SETTING(int, FlickStick, 0, 0, 2, "0 Off; 1 Hip-fire only (not aim or Alt-Fire); 2 On. Replaces normal right-stick camera input during gameplay.")
 RG_SETTING(int, FlickSpinDurationMs, 150, 0, 1000, "Initial flick rotation duration in milliseconds; 0 is instant. Independent from continuous stick rotation.")

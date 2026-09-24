@@ -1,4 +1,5 @@
 #include "rg/runtime.hpp"
+#include "rg/calibration_policy.hpp"
 #include "rg/mixed.hpp"
 #include "rg/haptic_gate.hpp"
 #include "rg/flick_stick.hpp"
@@ -336,6 +337,45 @@ void rotation(Object pc,float dt){
     originalRotation(pc,dt);
     r.controlPitch=read<float>(pc,b.control);r.controlYaw=read<float>(pc,b.control+4);
 }
+void updateCalibrationContext(Runtime& r,Object pc){
+    if(!reflectionReady.load(std::memory_order_acquire)){r.calibrationMenuAt.store(0,std::memory_order_release);return;}
+    if(!b.is(pc,b.pcClass)||!b.local(pc)){r.calibrationMenuAt.store(0,std::memory_order_release);return;}
+    auto save=read<Object>(pc,b.save);
+    if(b.is(save,b.saveClass))r.presentation=b.boolValue(b.controllerProperty,static_cast<std::byte*>(save)+b.controller)?1:0;
+    DWORD foreground{};GetWindowThreadProcessId(GetForegroundWindow(),&foreground);
+    // TickActor supplies a live controller, including paused input ticks.
+    // Never resolve the player/world from viewport Draw during loading.
+    // Inactive gameplay alone is not a menu (loading, cinematics, lost focus).
+    bool menu=b.boolValue(b.screenProperty,static_cast<std::byte*>(pc)+b.screen);
+    bool eligible=menu&&foreground==GetCurrentProcessId()&&!r.suspended.load()&&!b.cinematic(pc,true);
+    r.calibrationMenuAt.store(eligible?monotonicNs():0,std::memory_order_release);
+}
+using ActorTick=void(*)(Object,float,int,void*);ActorTick originalActorTick{};
+void actorTick(Object pc,float dt,int tickType,void* tickFunction){
+    updateCalibrationContext(*runtime,pc);
+    originalActorTick(pc,dt,tickType,tickFunction);
+}
+// Change glyph selection only. The native action lookup and its FKey are forwarded unchanged.
+using KeyIcon=void*(*)(void*,const void*,bool,bool,unsigned char);KeyIcon originalKeyIcon{};
+void* keyIcon(void* result,const void* key,bool controller,bool sony,unsigned char vendor){
+ auto& r=*runtime;auto now=monotonicNs(),at=r.controllerIdentityAt.load(std::memory_order_acquire);
+ auto style=controllerGlyphStyle(controller,!r.suspended.load()&&at&&now>=at&&now-at<2'000'000'000,r.controllerLayout.load(),sony,vendor);
+ return originalKeyIcon(result,key,controller,style.sony,style.vendor);
+}
+// The generic action/axis renderers use this separate lookup rather than OfType.
+// Route only real gamepad keys through the family-aware renderer; keyboard keys
+// and unknown/stale identities keep the original lookup and its fallback labels.
+using GenericKeyIcon=void*(*)(void*,const void*);GenericKeyIcon originalGenericKeyIcon{};
+void* genericKeyIcon(void* result,const void* key){
+ auto& r=*runtime;auto now=monotonicNs(),at=r.controllerIdentityAt.load(std::memory_order_acquire);
+ auto layout=r.controllerLayout.load();int vendor=calibrationIconVendor(layout);
+ if(!r.suspended.load()&&at&&now>=at&&now-at<2'000'000'000&&vendor>=0&&b.gamepadKey(key)){
+  static std::atomic<int> loggedVendor{-1};
+  if(loggedVendor.exchange(vendor)!=vendor)r.log("Generic controller glyph renderer: vendor="+std::to_string(vendor));
+  return originalKeyIcon(result,key,true,vendor==1||vendor==2,static_cast<unsigned char>(vendor));
+ }
+ return originalGenericKeyIcon(result,key);
+}
 bool hook(void* target,void* detour,void** original){
     if(!target)return false;auto created=MH_CreateHook(target,detour,original);
     if(created!=MH_OK){runtime->log(std::string("Hook creation failed: ")+MH_StatusToString(created));return false;}
@@ -402,6 +442,15 @@ bool installBindings(Runtime& r){
     auto axisTarget=symbol<void*>(engine,"?InputAxis@APlayerController@@UEAA_NUFKey@@MMH_N@Z");
     constexpr unsigned char axisPrefix[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xec,0x70};
     if(std::memcmp(axisTarget,axisPrefix,sizeof(axisPrefix)))throw std::runtime_error("Stick axis instructions changed; no hooks installed");
+    auto genericKeyIconTarget=symbol<void*>(game,"?GetKeyIconText@UTouristHelperLibrary@@SA?AVFText@@AEBUFKey@@@Z");
+    constexpr unsigned char genericKeyIconPrefix[]={0x48,0x89,0x5c,0x24,0x20,0x55,0x57,0x41,0x56,0x48,0x8d,0xac,0x24,0x30,0xfa,0xff,0xff};
+    if(std::memcmp(genericKeyIconTarget,genericKeyIconPrefix,sizeof(genericKeyIconPrefix)))throw std::runtime_error("Generic glyph renderer instructions changed; no hooks installed");
+    auto keyIconTarget=symbol<void*>(game,"?GetKeyIconTextOfType@UTouristHelperLibrary@@SA?AVFText@@AEBUFKey@@_N1W4EControllerVendor@@@Z");
+    constexpr unsigned char keyIconPrefix[]={0x48,0x89,0x5c,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+    if(std::memcmp(keyIconTarget,keyIconPrefix,sizeof(keyIconPrefix)))throw std::runtime_error("Glyph renderer instructions changed; no hooks installed");
+    auto actorTickTarget=symbol<void*>(engine,"?TickActor@APlayerController@@UEAAXMW4ELevelTick@@AEAUFActorTickFunction@@@Z");
+    constexpr unsigned char actorTickPrefix[]={0x40,0x53,0x57,0x48,0x81,0xec,0xa8,0,0,0,0x48,0x8b,0xf9};
+    if(std::memcmp(actorTickTarget,actorTickPrefix,sizeof(actorTickPrefix)))throw std::runtime_error("Controller tick instructions changed; no hooks installed");
     auto rotationTarget=symbol<void*>(engine,"?UpdateRotation@APlayerController@@UEAAXM@Z");
     constexpr unsigned char rotationPrefix[]={0x40,0x53,0x48,0x83,0xec,0x70,0x8b,0x81,0x08,0x05,0x00,0x00,0x48,0x8d,0x54,0x24,0x20,0xc5,0xfb,0x10,0x81,0x00,0x05,0x00,0x00};
     if(std::memcmp(rotationTarget,rotationPrefix,sizeof(rotationPrefix)))throw std::runtime_error("Camera instructions changed; no hooks installed");
@@ -413,7 +462,7 @@ bool installBindings(Runtime& r){
     if(MH_Initialize()!=MH_OK)throw std::runtime_error("MinHook initialization failed");
     std::vector<void*> targets;
     auto create=[&](void* target,void* detour,void** original){if(!hook(target,detour,original))return false;targets.push_back(target);return true;};
-    bool ok=create(localVirtualTarget,reinterpret_cast<void*>(&localVirtual),reinterpret_cast<void**>(&originalLocalVirtual))&&create(keyTarget,reinterpret_cast<void*>(&inputKey),reinterpret_cast<void**>(&originalKey))&&create(aimTarget,reinterpret_cast<void*>(&aimTriggerChanged),reinterpret_cast<void**>(&originalAimTrigger))&&create(axisTarget,reinterpret_cast<void*>(&inputAxis),reinterpret_cast<void**>(&originalAxis))&&create(rotationTarget,reinterpret_cast<void*>(&rotation),reinterpret_cast<void**>(&originalRotation))&&create(setTarget,reinterpret_cast<void*>(&setInput),reinterpret_cast<void**>(&originalSet))&&create(commitTarget,reinterpret_cast<void*>(&commitInput),reinterpret_cast<void**>(&originalCommit))&&create(mouseTarget,reinterpret_cast<void*>(&mouseMove),reinterpret_cast<void**>(&originalMouse));
+    bool ok=create(genericKeyIconTarget,reinterpret_cast<void*>(&genericKeyIcon),reinterpret_cast<void**>(&originalGenericKeyIcon))&&create(keyIconTarget,reinterpret_cast<void*>(&keyIcon),reinterpret_cast<void**>(&originalKeyIcon))&&create(actorTickTarget,reinterpret_cast<void*>(&actorTick),reinterpret_cast<void**>(&originalActorTick))&&create(localVirtualTarget,reinterpret_cast<void*>(&localVirtual),reinterpret_cast<void**>(&originalLocalVirtual))&&create(keyTarget,reinterpret_cast<void*>(&inputKey),reinterpret_cast<void**>(&originalKey))&&create(aimTarget,reinterpret_cast<void*>(&aimTriggerChanged),reinterpret_cast<void**>(&originalAimTrigger))&&create(axisTarget,reinterpret_cast<void*>(&inputAxis),reinterpret_cast<void**>(&originalAxis))&&create(rotationTarget,reinterpret_cast<void*>(&rotation),reinterpret_cast<void**>(&originalRotation))&&create(setTarget,reinterpret_cast<void*>(&setInput),reinterpret_cast<void**>(&originalSet))&&create(commitTarget,reinterpret_cast<void*>(&commitInput),reinterpret_cast<void**>(&originalCommit))&&create(mouseTarget,reinterpret_cast<void*>(&mouseMove),reinterpret_cast<void**>(&originalMouse));
     if(!ok){for(auto target:targets)MH_RemoveHook(target);r.log("Hooks rolled back before activation");return false;}
     for(auto target:targets)MH_QueueEnableHook(target);
     if(MH_ApplyQueued()!=MH_OK){r.suspended=true;for(auto target:targets)MH_DisableHook(target);r.log("Hook activation failed; functionality disabled");return false;}

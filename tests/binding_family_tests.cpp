@@ -39,7 +39,7 @@ int main(){try{
    for(auto lang:{"en","fr","de","es","it","pt"}){auto label=nativeOptionValue(s,option,i,lang,ControllerLayout::Sony,caps);check(!label.empty()&&label.find("choice.")==std::string::npos,"all values translated");auto desc=std::string("description.")+option.key;check(localize(desc,lang)!=desc,"all row help translated");}
   }
  }
- for(int id:activationButtonOrder){auto s=parseConfig("ConfigVersion=2\nActivationButton="+std::to_string(id)+"\n").settings;check(sum(s)==id&&s.ActivationButton==0&&s.ConfigVersion==3,"every legacy ID migrates to exactly one family");}
+ for(int id:activationButtonOrder){auto s=parseConfig("ConfigVersion=2\nActivationButton="+std::to_string(id)+"\n").settings;check(sum(s)==id&&s.ActivationButton==0&&s.ConfigVersion==4,"every legacy ID migrates to exactly one family");}
  Settings s;s.GyroButton=20;s.GyroTouchpad=24;s.GyroStickSensor=25;s.GyroGripSensor=26;s.GyroStick=28;
  auto saved=parseConfig(serializeConfig(s)).settings;check(sum(saved)==sum(s)&&saved.GyroButton==20&&saved.GyroStick==28,"independent family values persist together");
  check(!gyroActivationHeld(buttonMask(12)|buttonMask(14)|buttonMask(17)|buttonMask(3),s),"one side of each Both family is insufficient");

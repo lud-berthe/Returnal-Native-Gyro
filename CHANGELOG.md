@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.4
+
+- Replace smoothing presets with exponential smoothing adjustable from 0 to 500 ms in 5 ms steps; 0 disables smoothing. Existing presets migrate to equivalent durations.
+- Add Off, Menus Only and Any Time automatic calibration modes for direct sensors. Menu calibration continues while gameplay is paused; Steam motion keeps Steam-owned calibration.
+- Correct controller button prompts and controller illustrations across controller families, including Nintendo and DualSense through Steam Input. Recalibration uses the matching controller glyph and stays hidden for keyboard navigation.
+- Select the motion source automatically at startup and keep it consistent for the session. Restart Returnal after changing Steam Input.
+- Simplify calibration help in all six languages and remove the temporary calibration debug display. Calibration timing is unchanged.
+- Eighteen automated test suites pass. Startup and gameplay were confirmed with the released runtime.
+
 ## 1.0.3
 
 - Fix periodic gyro camera pauses with Steam Controllers: HID device discovery and opening now run in the background instead of blocking motion polling every two seconds.

@@ -1,23 +1,33 @@
 #include "rg/runtime.hpp"
 #include "rg/process_identity.hpp"
 #include "rg/motion_session.hpp"
+#include "rg/calibration_policy.hpp"
 #include <thread>
 #include <sstream>
 #include <iomanip>
 namespace rg {
 void sensorLoop(Runtime& r){
     auto settings=r.snapshot();unsigned revision=r.revision.load();
-    auto backend=makeMotionBackend(settings.SensorBackend);
+    // Source is automatic and locked by AutoBackend after the first connection.
+    const int deviceIndex=settings.DeviceIndex;
+    auto backend=makeMotionBackend(0);
     MotionProcessor processor;MotionSession motionSession;bool wasActive=false;std::uint64_t epoch=1;
     std::uint64_t lastPublish=0,lastLog=0;std::string previousError;
     for(;;){
         auto nextRevision=r.revision.load(std::memory_order_acquire);
-        if(revision!=nextRevision){settings=r.snapshot();revision=nextRevision;}
+        if(revision!=nextRevision){
+            settings=r.snapshot();revision=nextRevision;
+        }
         if(!backend->connected()){
             r.sensorActive=false;r.sampleTime=0;r.controllerButtons=0;r.availableButtons=0;r.controllerTouchpad=false;wasActive=false;r.motionEpoch=++epoch;
-            if(!backend->connect(settings.DeviceIndex)){
+            if(!backend->connect(deviceIndex)){
                 auto error=backend->error();if(error!=previousError){r.log(error);previousError=error;}
                 {std::lock_guard lock(r.diagnosticsMutex);r.device=error;r.diagnostics={};}
+                // Metadata only: a missing direct sensor must not default to Sony icons.
+                auto identity=steamPresentation(deviceIndex);
+                r.controllerLayout.store(identity?identity->layout:ControllerLayout::Generic);
+                r.controllerDiagram.store(identity?identity->diagram:ControllerDiagram::Native);
+                r.controllerIdentityAt.store(identity?monotonicNs():0,std::memory_order_release);
                 Sleep(1000);continue;
             }
             previousError.clear();auto info=backend->info();
@@ -28,7 +38,7 @@ void sensorLoop(Runtime& r){
             }
             processor.setExternalCalibration(info.externalCalibration);r.externalCalibration.store(info.externalCalibration,std::memory_order_release);
             r.log(info.externalCalibration?"Calibration owner: Steam Input; mod manual/automatic calibration bypassed":"Calibration owner: mod (direct sensor)");
-            r.controllerLayout.store(info.layout);r.controllerTouchpad.store(info.touchpad);
+            r.controllerIdentityAt.store(monotonicNs(),std::memory_order_release);r.controllerLayout.store(info.layout);r.controllerDiagram.store(info.diagram);r.controllerTouchpad.store(info.touchpad);
             std::ostringstream message;message<<info.name<<" VID="<<std::hex<<info.vendor<<" PID="<<info.product<<std::dec<<" Bluetooth="<<(info.connectionKnown?std::to_string(info.bluetooth):"unknown")<<" factoryCalibration="<<info.factoryCalibration;
             r.log(message.str());{std::lock_guard lock(r.diagnosticsMutex);r.device=message.str();}
         }
@@ -37,13 +47,13 @@ void sensorLoop(Runtime& r){
         if(command==1){processor.beginCalibration();r.log("Manual calibration started; keep controller still");}
         if(command==2){processor.resetCalibration();r.log("Calibration reset");}
         auto sample=backend->read();if(!sample)continue;motionSession.sample(monotonicNs());
-        auto capabilities=backend->info();r.controllerTouchpad.store(capabilities.touchpad);
+        auto capabilities=backend->info();r.controllerIdentityAt.store(monotonicNs(),std::memory_order_release);r.controllerLayout.store(capabilities.layout);r.controllerDiagram.store(capabilities.diagram);r.controllerTouchpad.store(capabilities.touchpad);
         auto previousButtons=r.availableButtons.exchange(capabilities.availableButtons);
         if(previousButtons!=capabilities.availableButtons)r.log("Gyro button capabilities="+std::to_string(capabilities.availableButtons));
         r.controllerButtons.store(sample->buttons,std::memory_order_release);
         auto now=monotonicNs();auto gameAt=r.gameTime.load(std::memory_order_acquire);
         auto flags=r.gameFlags.load();
-        GameplayState game{(flags&1)!=0&&(now-gameAt)<100'000'000,(flags&2)!=0,(flags&4)!=0,r.panelOpen.load()||r.suspended.load(),(flags&8)!=0};
+        GameplayState game{(flags&1)!=0&&(now-gameAt)<100'000'000,(flags&2)!=0,(flags&4)!=0,r.panelOpen.load()||r.suspended.load(),(flags&8)!=0,calibrationMenuContext(r.calibrationMenuAt.load(std::memory_order_acquire),r.calibrationUiMenuAt.load(std::memory_order_acquire),now)};
         auto delta=processor.process(*sample,settings,game);
         r.toggleEnabled.store(processor.toggleEnabled(),std::memory_order_release);
         bool active=processor.diagnostics().active;
@@ -55,7 +65,7 @@ void sensorLoop(Runtime& r){
         if(settings.VerboseSamples){std::ostringstream out;out<<"sample "<<sample->sensorNs<<" raw="<<sample->degreesPerSecond.x<<","<<sample->degreesPerSecond.y<<","<<sample->degreesPerSecond.z<<" delta="<<delta.yawDegrees<<","<<delta.pitchDegrees;r.log(out.str());}
         if(settings.DiagnosticLogging&&now-lastLog>2'000'000'000){
             const auto& d=processor.diagnostics();std::ostringstream out;
-            out<<"state frames="<<r.cameraCalls.load()<<" blocked="<<r.blockedReasons.load()<<" flags="<<flags<<" active="<<d.active<<" enabled="<<settings.GyroEnabled<<" activation="<<settings.ActivationMode<<" gyroButton="<<settings.GyroButton<<" gyroPad="<<settings.GyroTouchpad<<" gyroStickSensor="<<settings.GyroStickSensor<<" gyroGrip="<<settings.GyroGripSensor<<" gyroStick="<<settings.GyroStick<<" toggle="<<processor.toggleEnabled()<<" ratchet="<<settings.RatchetButton<<" buttons="<<sample->buttons<<" Hz="<<d.sensorHz<<" gravity="<<d.gravity.x<<","<<d.gravity.y<<","<<d.gravity.z<<" calibration="<<static_cast<int>(d.calibration)<<" progress="<<d.calibrationProgress<<" inputCalls="<<r.inputCalls.load()<<" suppressed="<<r.suppressed.load()<<" HUD="<<r.presentation.load()<<" camera="<<r.controlYaw.load()<<","<<r.controlPitch.load()<<" applied="<<r.appliedYaw.load()<<","<<r.appliedPitch.load()<<" dropped="<<r.queueDrops.load()<<" flick="<<settings.FlickStick<<" flickXY="<<r.flickX.load()<<","<<r.flickY.load()<<" flickYaw="<<r.flickYaw.load()<<" stickSuppressed="<<r.flickSuppressed.load();
+            out<<"state frames="<<r.cameraCalls.load()<<" blocked="<<r.blockedReasons.load()<<" flags="<<flags<<" active="<<d.active<<" enabled="<<settings.GyroEnabled<<" activation="<<settings.ActivationMode<<" gyroButton="<<settings.GyroButton<<" gyroPad="<<settings.GyroTouchpad<<" gyroStickSensor="<<settings.GyroStickSensor<<" gyroGrip="<<settings.GyroGripSensor<<" gyroStick="<<settings.GyroStick<<" toggle="<<processor.toggleEnabled()<<" ratchet="<<settings.RatchetButton<<" buttons="<<sample->buttons<<" Hz="<<d.sensorHz<<" gravity="<<d.gravity.x<<","<<d.gravity.y<<","<<d.gravity.z<<" autoCalibration="<<settings.AutomaticCalibration<<" calibrationMenu="<<game.menuOpen<<" bias="<<d.bias.x<<","<<d.bias.y<<","<<d.bias.z<<" calibration="<<static_cast<int>(d.calibration)<<" progress="<<d.calibrationProgress<<" inputCalls="<<r.inputCalls.load()<<" suppressed="<<r.suppressed.load()<<" HUD="<<r.presentation.load()<<" camera="<<r.controlYaw.load()<<","<<r.controlPitch.load()<<" applied="<<r.appliedYaw.load()<<","<<r.appliedPitch.load()<<" dropped="<<r.queueDrops.load()<<" flick="<<settings.FlickStick<<" flickXY="<<r.flickX.load()<<","<<r.flickY.load()<<" flickYaw="<<r.flickYaw.load()<<" stickSuppressed="<<r.flickSuppressed.load();
             r.log(out.str());lastLog=now;
         }
     }

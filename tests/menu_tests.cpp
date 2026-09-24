@@ -18,6 +18,8 @@ int main(){try{
   rg::setOptionIndex(s,option,-99);check(rg::optionIndex(s,option)==0,"lower bound");
   for(auto language:{"en","fr","de","es","it","pt","xx"}){check(!rg::localize(option.key,language).empty(),"localized label and English fallback");auto description=std::string("description.")+option.key;check(rg::localize(description,language)!=description,"localized description");}
  }
+ const auto smoothing=rg::gyroOptions()[12];check(smoothing.step==5&&smoothing.count==101,"smoothing spans 0..500ms in 5ms steps");
+ check(rg::optionValue(smoothing,0,"fr")==rg::localize("off","fr")&&rg::optionValue(smoothing,1,"en")=="5 ms"&&rg::optionValue(smoothing,100,"en")=="500 ms","smoothing display endpoints");
  s.MixedInput=false;s.DeviceIndex=3;rg::resetGyroOptions(s);check(!s.MixedInput&&s.DeviceIndex==3,"gyro reset preserves hidden configuration");
  check(s.SensitivityX==2.5f&&s.ActivationMode==1&&!s.LinkXY&&!s.RatchetButton,"gyro reset restores requested defaults");
  auto legacy=rg::parseConfig("ActivationMode=4\nActivationButton=1\nRatchetButton=5\n").settings;

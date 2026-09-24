@@ -1,7 +1,9 @@
 #include "rg/runtime.hpp"
 #include "rg/gyro_menu.hpp"
 #include "rg/short_press.hpp"
+#include "rg/calibration_policy.hpp"
 #include <array>
+#include <algorithm>
 #include <MinHook.h>
 #include <vector>
 #include <cstring>
@@ -10,17 +12,20 @@ namespace rg { namespace {
 using Obj=void*;using Name=std::uint64_t;
 struct Str{wchar_t* data{};int count{},capacity{};};struct Text{alignas(8) std::byte bytes[24]{};};
 struct Api{
+ bool(*childOf)(Obj,Obj){};
  Obj objects{};void(*makeName)(Name*,const wchar_t*,int){};Obj(*findObject)(Obj,Obj,const wchar_t*,bool){};
  Obj(*property)(Obj,Name){};int(*offset)(Obj){};Obj(*function)(Obj,Name,int){};void(*event)(Obj,Obj,void*){};
  Obj(*createWidget)(Obj,Obj,Name){};Obj(*construct)(Obj,Obj,Name,unsigned,unsigned,Obj,bool,Obj,bool){};
  void(*setFocus)(Obj){};void(*copyValue)(Obj,void*,const void*){};bool(*focused)(Obj){};bool(*focusedChildren)(Obj){};void(*scrollIntoView)(Obj,Obj,bool,int,float){};void(*syncScroll)(Obj){};void(*syncSwitcherSlot)(Obj){};
  bool(*removeChild)(Obj,Obj){};Obj(*parent)(Obj){};bool(*visible)(Obj){};bool(*inViewport)(Obj){};void(*visibility)(Obj,unsigned char){};
+ Obj(*activeWidget)(Obj){};void(*selectWidget)(Obj,Obj){};
  const void* triangle{};
+ Text*(*keyIconOfType)(Text*,const void*,bool,bool,unsigned char){};
  Obj(*scrollClass)(){};Obj(*addChild)(Obj,Obj){};Obj(*setContent)(Obj,Obj){};int(*count)(Obj){};Obj(*child)(Obj,int){};
- Text*(*textFrom)(Text*,const Str&){};Text*(*textAssign)(Text*,const Text&){};void(*textDestroy)(Text*){};
+ Text*(*textFrom)(Text*,const Str&){};Text*(*textAssign)(Text*,const Text&){};void(*textDestroy)(Text*){};bool(*textIdentical)(const Text*,const Text*){};
  Str*(*arrayType)(Obj,Str*,Str*,unsigned){};void(*arrayClear)(void*,Obj){};int(*arrayAdd)(void*,Obj,const void*){};Str*(*language)(Str*){};void(*freeMemory)(void*){};
 } a;
-Obj calibrationPrompt{};CalibrationCountdown calibrationCountdown;bool calibrationWasDown{},calibrationWaiting{},calibrationCollecting{},calibrationPromptActive{};ULONGLONG calibrationRequestedAt{},calibrationCompletedAt{};std::string calibrationLabel;
+Obj calibrationPrompt{};CalibrationCountdown calibrationCountdown;bool calibrationWasDown{},calibrationWaiting{},calibrationCollecting{},calibrationPromptActive{};ULONGLONG calibrationRequestedAt{},calibrationCompletedAt{};std::string calibrationLabel,calibrationHelp;int calibrationVendor=-2;Text calibrationIcon;bool calibrationIconReady{};
 bool initialized{},failed{};ULONGLONG nextScan{};Obj pendingController{};int pendingIndex{},pendingSerial{};
 struct Row{Obj widget{},spinner{};const GyroOption* option{};int index{};};
 Obj controller{},root{},button{},page{};int controllerIndex{},controllerSerial{};std::vector<Row> rows;std::string language="en";Obj lastFocused{};ControllerLayout labelsLayout{ControllerLayout::Sony};bool labelsTouchpad{true},labelsExternalCalibration{};std::uint32_t labelsButtons{};
@@ -38,17 +43,22 @@ std::wstring wide(const std::string& value){int size=MultiByteToWideChar(CP_UTF8
 struct ScopedText {Text value;ScopedText(const std::string& text){auto w=wide(text);Str str{w.data(),static_cast<int>(w.size()+1),static_cast<int>(w.size()+1)};a.textFrom(&value,str);}~ScopedText(){a.textDestroy(&value);}};
 void setText(Obj object,const wchar_t* property,const std::string& value){ScopedText text(value);a.textAssign(reinterpret_cast<Text*>(static_cast<char*>(object)+offset(object,property)),text.value);}
 void init(){auto core=GetModuleHandleW(L"Returnal-Core-Win64-Shipping.dll"),objects=GetModuleHandleW(L"Returnal-CoreUObject-Win64-Shipping.dll"),umg=GetModuleHandleW(L"Returnal-UMG-Win64-Shipping.dll"),engine=GetModuleHandleW(L"Returnal-Engine-Win64-Shipping.dll");
+ a.childOf=symbol<decltype(a.childOf)>(objects,"?IsChildOf@UStruct@@QEBA_NPEBV1@@Z");
  a.objects=symbol<Obj>(objects,"?GUObjectArray@@3VFUObjectArray@@A");a.makeName=symbol<decltype(a.makeName)>(core,"??0FName@@QEAA@PEB_WW4EFindName@@@Z");a.findObject=symbol<decltype(a.findObject)>(objects,"?StaticFindObject@@YAPEAVUObject@@PEAVUClass@@PEAV1@PEB_W_N@Z");
  a.property=symbol<decltype(a.property)>(objects,"?FindPropertyByName@UStruct@@QEBAPEAVFProperty@@VFName@@@Z");a.offset=symbol<decltype(a.offset)>(objects,"?GetOffset_ForInternal@FProperty@@QEBAHXZ");a.function=symbol<decltype(a.function)>(objects,"?FindFunctionByName@UClass@@QEBAPEAVUFunction@@VFName@@W4Type@EIncludeSuperFlag@@@Z");a.event=symbol<decltype(a.event)>(objects,"?ProcessEvent@UObject@@UEAAXPEAVUFunction@@PEAX@Z");
  a.createWidget=symbol<decltype(a.createWidget)>(umg,"?CreateWidgetInstance@UUserWidget@@SAPEAV1@AEAVUWidget@@V?$TSubclassOf@VUUserWidget@@@@VFName@@@Z");a.construct=symbol<decltype(a.construct)>(objects,"?StaticConstructObject_Internal@@YAPEAVUObject@@PEBVUClass@@PEAV1@VFName@@W4EObjectFlags@@W4EInternalObjectFlags@@1_NPEAUFObjectInstancingGraph@@5@Z");a.scrollClass=symbol<decltype(a.scrollClass)>(umg,"?GetPrivateStaticClass@UScrollBox@@CAPEAVUClass@@XZ");
+ a.activeWidget=symbol<decltype(a.activeWidget)>(umg,"?GetActiveWidget@UWidgetSwitcher@@QEBAPEAVUWidget@@XZ");
+ a.selectWidget=symbol<decltype(a.selectWidget)>(umg,"?SetActiveWidget@UWidgetSwitcher@@UEAAXPEAVUWidget@@@Z");
  a.parent=symbol<decltype(a.parent)>(umg,"?GetParent@UWidget@@QEBAPEAVUPanelWidget@@XZ");
  a.visible=symbol<decltype(a.visible)>(umg,"?IsVisible@UWidget@@QEBA_NXZ");
  a.inViewport=symbol<decltype(a.inViewport)>(umg,"?IsInViewport@UUserWidget@@QEBA_NXZ");
  a.visibility=symbol<decltype(a.visibility)>(umg,"?SetVisibility@UWidget@@UEAAXW4ESlateVisibility@@@Z");
+ a.keyIconOfType=symbol<decltype(a.keyIconOfType)>(GetModuleHandleW(L"Returnal-Returnal-Win64-Shipping.dll"),"?GetKeyIconTextOfType@UTouristHelperLibrary@@SA?AVFText@@AEBUFKey@@_N1W4EControllerVendor@@@Z");
  a.triangle=symbol<void*>(GetModuleHandleW(L"Returnal-InputCore-Win64-Shipping.dll"),"?Gamepad_FaceButton_Top@EKeys@@2UFKey@@B");
  a.removeChild=symbol<decltype(a.removeChild)>(umg,"?RemoveChild@UPanelWidget@@QEAA_NPEAVUWidget@@@Z");
  a.addChild=symbol<decltype(a.addChild)>(umg,"?AddChild@UPanelWidget@@QEAAPEAVUPanelSlot@@PEAVUWidget@@@Z");a.setContent=symbol<decltype(a.setContent)>(umg,"?SetContent@UContentWidget@@QEAAPEAVUPanelSlot@@PEAVUWidget@@@Z");a.count=symbol<decltype(a.count)>(umg,"?GetChildrenCount@UPanelWidget@@QEBAHXZ");a.child=symbol<decltype(a.child)>(umg,"?GetChildAt@UPanelWidget@@QEBAPEAVUWidget@@H@Z");
  a.textFrom=symbol<decltype(a.textFrom)>(core,"?FromString@FText@@SA?AV1@AEBVFString@@@Z");a.textAssign=symbol<decltype(a.textAssign)>(core,"??4FText@@QEAAAEAV0@AEBV0@@Z");a.textDestroy=symbol<decltype(a.textDestroy)>(core,"??1FText@@QEAA@XZ");
+ a.textIdentical=symbol<decltype(a.textIdentical)>(core,"?IdenticalTo@FText@@QEBA_NAEBV1@@Z");
  a.copyValue=symbol<decltype(a.copyValue)>(objects,"?CopyCompleteValue@FProperty@@QEBAXPEAXPEBX@Z");
  a.setFocus=symbol<decltype(a.setFocus)>(umg,"?SetFocus@UWidget@@QEAAXXZ");
  a.focused=symbol<decltype(a.focused)>(umg,"?HasAnyUserFocus@UWidget@@QEBA_NXZ");a.focusedChildren=symbol<decltype(a.focusedChildren)>(umg,"?HasFocusedDescendants@UWidget@@QEBA_NXZ");a.scrollIntoView=symbol<decltype(a.scrollIntoView)>(umg,"?ScrollWidgetIntoView@UScrollBox@@QEAAXPEAVUWidget@@_NW4EDescendantScrollDestination@@M@Z");a.syncSwitcherSlot=symbol<decltype(a.syncSwitcherSlot)>(umg,"?SynchronizeProperties@UWidgetSwitcherSlot@@UEAAXXZ");a.syncScroll=symbol<decltype(a.syncScroll)>(umg,"?SynchronizeProperties@UScrollBox@@UEAAXXZ");
@@ -59,6 +69,100 @@ void init(){auto core=GetModuleHandleW(L"Returnal-Core-Win64-Shipping.dll"),obje
 char* item(int index){int count=read<int>(a.objects,0x24);if(index<0||index>=count||count>2000000)return nullptr;auto chunks=read<char**>(a.objects,0x10);auto chunk=chunks[index/65536];return chunk?chunk+(index%65536)*24:nullptr;}
 bool validObject(Obj object,int index,int serial){auto slot=item(index);return slot&&read<Obj>(slot,0)==object&&read<int>(slot,16)==serial&&!(read<unsigned>(slot,8)&0x30000000);}
 bool validController(){return validObject(controller,controllerIndex,controllerSerial);}
+struct CalibrationMenuWidget {Obj widget{};int index{},serial{};};
+std::vector<CalibrationMenuWidget> calibrationMenus;
+void trackCalibrationMenu(Obj widget){
+ if(!widget||(read<unsigned>(widget,8)&0x30))return;
+ const auto cls=read<Obj>(widget,0x10);bool menu=false;
+ // Only known menu roots: HUD widgets, loading screens and cinematics do not
+ // qualify. Native base classes include their Blueprint-derived settings/pause UI.
+ for(auto path:{L"/Script/Returnal.SystemSettingsMenu",L"/Script/Returnal.PauseMenu",
+     L"/Script/Returnal.TeleportMenu",L"/Script/Returnal.SocialChallengeSelectMenu",
+     L"/Game/UI/SystemMenu/WBP_SystemMenu.WBP_SystemMenu_C"}){
+  auto base=findClass(path);if(base&&a.childOf(cls,base)){menu=true;break;}
+ }
+ if(!menu)return;
+ if(std::any_of(calibrationMenus.begin(),calibrationMenus.end(),[&](const auto& x){return x.widget==widget&&validObject(widget,x.index,x.serial);}))return;
+ int index=read<int>(widget,12);auto slot=item(index);
+ if(slot&&read<Obj>(slot,0)==widget)calibrationMenus.push_back({widget,index,read<int>(slot,16)});
+}
+void calibrationMenuTick(Runtime& r){
+ DWORD foreground{};GetWindowThreadProcessId(GetForegroundWindow(),&foreground);
+ bool open=false;
+ for(auto it=calibrationMenus.begin();it!=calibrationMenus.end();){
+  // Check slot identity and serial before touching a widget retained across maps.
+  if(!validObject(it->widget,it->index,it->serial)){it=calibrationMenus.erase(it);continue;}
+  open|=calibrationMenuWidgetEligible(true,a.visible(it->widget),a.inViewport(it->widget),
+      foreground==GetCurrentProcessId(),r.suspended.load());
+  ++it;
+ }
+ // Viewport Draw continues while gameplay actor ticks are paused. No player or
+ // world lookup here: only validated native widgets and their own visibility.
+ r.calibrationUiMenuAt.store(open?monotonicNs():0,std::memory_order_release);
+ static bool previous=false;if(open!=previous){previous=open;r.log(open?"Calibration menu context: native menu visible":"Calibration menu context: native menu closed/background");}
+}
+// Presentation-only selection inside the native controller preset widget. Never
+// write the game's controller vendor or preset: those also affect input behavior.
+struct DiagramSelection {Obj switcher{},native{},selected{};int index{},serial{};};
+struct DiagramOwner {Obj widget{};int index{},serial{};};
+std::vector<DiagramSelection> diagrams;std::vector<DiagramOwner> diagramOwners;bool diagramFailed{};
+Obj optionalWidget(Obj owner,const wchar_t* key){
+ if(!owner)return nullptr;auto property=a.property(read<Obj>(owner,0x10),name(key));
+ if(!property)return nullptr;int at=a.offset(property);
+ if(at<0||at>16384)throw std::runtime_error("Controller diagram property layout mismatch");
+ return read<Obj>(owner,at);
+}
+void trackDiagram(Obj widget){
+ if(diagramFailed||!widget||(read<unsigned>(widget,8)&0x30))return;
+ if(!optionalWidget(widget,L"ControllerGuideSwitcher")&&!optionalWidget(widget,L"ControllerPreviewSwitcher"))return;
+ if(std::any_of(diagramOwners.begin(),diagramOwners.end(),[&](const auto& x){return x.widget==widget&&validObject(widget,x.index,x.serial);}))return;
+ int index=read<int>(widget,12);auto slot=item(index);
+ if(slot&&read<Obj>(slot,0)==widget)diagramOwners.push_back({widget,index,read<int>(slot,16)});
+}
+void controllerDiagramTick(Runtime& r){
+ if(diagramFailed)return;
+ try{
+  auto now=monotonicNs(),at=r.controllerIdentityAt.load(std::memory_order_acquire);
+  bool fresh=!r.suspended.load()&&at&&now>=at&&now-at<2'000'000'000;
+  auto artwork=controllerArtwork(fresh?r.controllerDiagram.load():ControllerDiagram::Native);
+  for(auto it=diagrams.begin();it!=diagrams.end();){
+   if(!validObject(it->switcher,it->index,it->serial)){it=diagrams.erase(it);continue;}
+   if(!artwork.guide){
+    bool nativeChild=false;for(int i=0;i<a.count(it->switcher);++i)nativeChild|=a.child(it->switcher,i)==it->native;
+    if(nativeChild&&a.activeWidget(it->switcher)==it->selected)a.selectWidget(it->switcher,it->native);
+    it=diagrams.erase(it);continue;
+   }
+   ++it;
+  }
+  if(!artwork.guide)return;
+  // Also find an already-constructed active preset when attaching to a menu.
+  if(controller&&validController()){
+   auto presets=field(controller,L"WBP_ControllerPresets",2424);
+   auto presetSwitcher=optionalWidget(presets,L"PresetDisplayWidgetSwitcher");
+   if(presetSwitcher)trackDiagram(a.activeWidget(presetSwitcher));
+  }
+  for(auto it=diagramOwners.begin();it!=diagramOwners.end();){
+   if(!validObject(it->widget,it->index,it->serial)){it=diagramOwners.erase(it);continue;}
+   auto owner=it->widget;++it;if(!a.visible(owner))continue;
+   auto switcher=optionalWidget(owner,L"ControllerGuideSwitcher");
+   auto guide=optionalWidget(owner,artwork.guide);
+   if(!switcher){switcher=optionalWidget(owner,L"ControllerPreviewSwitcher");guide=optionalWidget(owner,artwork.preview);}
+   if(!switcher||!guide||a.parent(guide)!=switcher)continue;
+   auto current=a.activeWidget(switcher);if(current==guide)continue;
+   auto found=std::find_if(diagrams.begin(),diagrams.end(),[&](const auto& x){return x.switcher==switcher;});
+   if(found==diagrams.end()){
+    int index=read<int>(switcher,12);auto slot=item(index);if(!slot||read<Obj>(slot,0)!=switcher)continue;
+    diagrams.push_back({switcher,current,guide,index,read<int>(slot,16)});
+   }else{
+    // A change between two mod-selected diagrams must retain the native fallback.
+    if(current!=found->selected)found->native=current;found->selected=guide;
+   }
+   a.selectWidget(switcher,guide);
+   r.log("Controller diagram selected: model="+std::to_string(static_cast<int>(r.controllerDiagram.load())));
+  }
+ }catch(const std::exception& e){diagramFailed=true;r.log(std::string("Controller diagram unavailable: ")+e.what());}
+}
+
 void currentLanguage(){if(!a.language)return;Str text;a.language(&text);if(text.data){language.clear();for(int i=0;i<text.count&&text.data[i];++i)language+=static_cast<char>(text.data[i]);a.freeMemory(text.data);}}
 void copyProperty(Obj target,Obj source,const wchar_t* key){auto targetProperty=prop(target,key),sourceProperty=prop(source,key);a.copyValue(targetProperty,static_cast<char*>(target)+a.offset(targetProperty),static_cast<char*>(source)+a.offset(sourceProperty));}
 void buttonStyle(Obj target,Obj source){for(auto key:{L"Style",L"Opacity",L"IsButton",L"ToggleTopLine",L"ToggleBottomLine",L"bIsTabButton",L"bIsSetting",L"ExpectedPreviewState",L"FocusKeeperTab"})copyProperty(target,source,key);}
@@ -66,13 +170,15 @@ void scrollStyle(Obj target,Obj source){for(auto key:{L"WidgetStyle",L"WidgetBar
 void pageLayout(Obj target,Obj source){auto targetSlot=field(target,L"Slot",40),sourceSlot=field(source,L"Slot",40);for(auto key:{L"Padding",L"HorizontalAlignment",L"VerticalAlignment"})copyProperty(targetSlot,sourceSlot,key);a.syncSwitcherSlot(targetSlot);}
 void followFocus(){Obj focused=nullptr;for(auto& row:rows)if(a.focused(row.widget)||a.focusedChildren(row.widget)){focused=row.widget;break;}if(focused&&focused!=lastFocused)a.scrollIntoView(page,focused,true,0,12.f);lastFocused=focused;}
 bool attachable(Obj target){auto owner=field(target,L"OwningSysSettingsMenu",2000),left=field(target,L"LeftHandVBox",2016),pages=field(target,L"VerticalOptionSwitcher",2024);return owner&&left&&pages&&a.count(left)==4&&a.count(pages)==4;}
+bool steamCalibrationRow(const GyroOption& option){return labelsExternalCalibration&&std::string_view(option.key)=="AutomaticCalibration";}
+int menuOptionCount(const Settings& settings,const GyroOption& option){return steamCalibrationRow(option)?1:nativeOptionCount(settings,option,labelsButtons);}
+int menuOptionIndex(const Settings& settings,const GyroOption& option){return steamCalibrationRow(option)?0:nativeOptionIndex(settings,option,labelsButtons);}
 void populateValues(Obj spinner,const GyroOption& option,const Settings& settings){
   auto values=prop(spinner,L"Values");Str type,extended;a.arrayType(values,&type,&extended,0);std::wstring arrayType=(type.data?type.data:L"");if(extended.data)arrayType+=extended.data;if(type.data)a.freeMemory(type.data);if(extended.data)a.freeMemory(extended.data);
   bool strings=arrayType.find(L"FString")!=std::wstring::npos,texts=arrayType.find(L"FText")!=std::wstring::npos;
   if(!strings&&!texts)throw std::runtime_error("Unsupported native spinner value type");
   auto data=static_cast<char*>(spinner)+a.offset(values);a.arrayClear(data,values);
-  bool managed=labelsExternalCalibration&&std::string_view(option.key)=="AutomaticCalibration";
-  for(int i=0;i<(managed?1:nativeOptionCount(settings,option,labelsButtons));++i){auto label=managed?localize("calibration.steam",language):nativeOptionValue(settings,option,i,language,labelsLayout,labelsButtons);if(texts){ScopedText value(label);a.arrayAdd(data,values,&value.value);}else{auto w=wide(label);Str value{w.data(),static_cast<int>(w.size()+1),static_cast<int>(w.size()+1)};a.arrayAdd(data,values,&value);}}
+  for(int i=0;i<menuOptionCount(settings,option);++i){auto label=steamCalibrationRow(option)?localize("calibration.steam",language):nativeOptionValue(settings,option,i,language,labelsLayout,labelsButtons);if(texts){ScopedText value(label);a.arrayAdd(data,values,&value.value);}else{auto w=wide(label);Str value{w.data(),static_cast<int>(w.size()+1),static_cast<int>(w.size()+1)};a.arrayAdd(data,values,&value);}}
 }
 void attachCalibrationPrompt(Obj target){
  auto reference=field(root,L"Prompt_ReturnDefault",2184),parent=a.parent(reference);
@@ -90,20 +196,21 @@ void attachCalibrationPrompt(Obj target){
  for(auto key:{L"Padding",L"Size",L"HorizontalAlignment",L"VerticalAlignment"})copyProperty(slot,sourceSlot,key);
  bool designTime=false;call(calibrationPrompt,L"PreConstruct",&designTime,1);
  call(calibrationPrompt,L"SetKey",a.triangle,24);
- calibrationLabel.clear();calibrationWasDown=true;calibrationCountdown.cancel();calibrationWaiting=calibrationCollecting=false;calibrationCompletedAt=0;
+ calibrationLabel.clear();calibrationHelp.clear();calibrationVendor=-2;calibrationWasDown=true;calibrationCountdown.cancel();calibrationWaiting=calibrationCollecting=false;calibrationCompletedAt=0;
  a.visibility(calibrationPrompt,1); // Collapsed until the gyro category is active.
 }
 void calibrationTick(Runtime& r){
  if(!calibrationPrompt)return;
  if(r.externalCalibration.load(std::memory_order_acquire)){calibrationCountdown.cancel();calibrationWaiting=calibrationCollecting=false;calibrationCompletedAt=0;calibrationWasDown=true;calibrationPromptActive=false;a.visibility(calibrationPrompt,1);return;}
- bool pageActive=a.inViewport(root)&&a.visible(root)&&read<int>(root,2088)==0&&read<int>(controller,2032)==4;
- if(pageActive!=calibrationPromptActive){calibrationPromptActive=pageActive;r.log(pageActive?"Native calibration footer active":"Native calibration footer hidden");}
+ auto sampleAt=r.sampleTime.load();auto sensorNow=monotonicNs();
+ bool connected=sampleAt&&sensorNow>=sampleAt&&sensorNow-sampleAt<200'000'000;
+ bool pageActive=calibrationPromptVisible(a.inViewport(root)&&a.visible(root)&&read<int>(root,2088)==0&&read<int>(controller,2032)==4,r.presentation.load(),r.externalCalibration.load())&&connected;
+ if(pageActive!=calibrationPromptActive){calibrationPromptActive=pageActive;calibrationVendor=-2;r.log(pageActive?"Native calibration footer active":"Native calibration footer hidden");}
  DWORD foreground{};GetWindowThreadProcessId(GetForegroundWindow(),&foreground);
  auto now=GetTickCount64();bool eligible=pageActive&&foreground==GetCurrentProcessId();
  a.visibility(calibrationPrompt,pageActive?0:1);
  // The added prompt is not registered in the game's action map; read the sensor device directly.
  bool down=(r.controllerButtons.load(std::memory_order_acquire)&buttonMask(11))!=0||read<bool>(calibrationPrompt,offset(calibrationPrompt,L"bIsMouseDown",2193));
- auto sampleAt=r.sampleTime.load();auto sensorNow=monotonicNs();bool connected=sampleAt&&sensorNow>=sampleAt&&sensorNow-sampleAt<200'000'000;
  MotionDiagnostics diagnostics;{std::lock_guard lock(r.diagnosticsMutex);diagnostics=r.diagnostics;}
  if(eligible&&connected&&down&&!calibrationWasDown&&!calibrationCountdown.active()&&!calibrationWaiting&&diagnostics.calibration!=CalibrationState::Collecting){
   calibrationCountdown.start(now);calibrationCompletedAt=0;r.log("Native calibration countdown started: 5 seconds");
@@ -122,6 +229,26 @@ void calibrationTick(Runtime& r){
  else if(calibrationWaiting||diagnostics.calibration==CalibrationState::Collecting)label=localize("calibration.collecting",language);
  else if(calibrationCompletedAt&&now-calibrationCompletedAt<3000)label=localize("calibration.complete",language);
  if(label!=calibrationLabel){ScopedText value(label);call(calibrationPrompt,L"SetPrompt",&value.value,sizeof(value.value));calibrationLabel=label;}
+ // SetPrompt and native controller/visibility refreshes may rebuild the icon.
+ // Keep its owning FText alive and repair only when the widget replaced it.
+ const int vendor=calibrationIconVendor(r.controllerLayout.load());
+ if(vendor>=0){
+  if(vendor!=calibrationVendor||!calibrationIconReady){
+   if(calibrationIconReady)a.textDestroy(&calibrationIcon);
+   calibrationIcon=Text{};
+   const bool sonyGlyphs=vendor==1||vendor==2;
+   a.keyIconOfType(&calibrationIcon,a.triangle,true,sonyGlyphs,static_cast<unsigned char>(vendor));
+   calibrationIconReady=true;calibrationVendor=vendor;
+   r.log("Calibration glyph selected: vendor="+std::to_string(vendor));
+  }
+  // Settings prompts render the nested WBP_ButtonIcon.SingleButton. The
+  // sibling TextBlock_Button is a separate fallback, not the visible glyph.
+  auto iconWidget=field(calibrationPrompt,L"WBP_ButtonIcon",1896);
+  for(auto textBlock:{field(calibrationPrompt,L"TextBlock_Button",1880),field(iconWidget,L"SingleButton",1872)}){
+   auto current=reinterpret_cast<const Text*>(static_cast<const char*>(textBlock)+offset(textBlock,L"Text"));
+   if(!a.textIdentical(current,&calibrationIcon))call(textBlock,L"SetText",&calibrationIcon,sizeof(calibrationIcon));
+  }
+ }
 }
 void buildRows(Obj target,const Settings& settings){
  auto rowClass=findClass(L"/Game/UI/SystemMenu/WBP_SettingBase.WBP_SettingBase_C"),spinnerClass=findClass(L"/Game/UI/SystemMenu/WBP_SettingSpinner.WBP_SettingSpinner_C");
@@ -131,9 +258,9 @@ void buildRows(Obj target,const Settings& settings){
   auto id=wide(option.key);auto rowName=L"ReturnalGyroRow_"+id,spinnerName=L"ReturnalGyroValue_"+id;
   Obj row=a.createWidget(target,rowClass,newName(rowName.c_str())),spinner=a.createWidget(target,spinnerClass,newName(spinnerName.c_str()));if(!row||!spinner)throw std::runtime_error("Cannot create native gyro row");
   write<Obj>(row,offset(row,L"OwningSysSettingsTab",1832),target);write<Obj>(row,offset(row,L"OwningSysSettingsMenu",1840),root);
-  setText(row,L"Title",localize(option.key,language));setText(row,L"BodyTitle","");setText(row,L"BodyDescription",localize(labelsExternalCalibration&&std::string_view(option.key)=="AutomaticCalibration"?"calibration.steamHelp":std::string("description.")+option.key,language));
+  setText(row,L"Title",localize(option.key,language));setText(row,L"BodyTitle","");setText(row,L"BodyDescription",localize(std::string("description.")+option.key,language));
   populateValues(spinner,option,settings);
-  int index=labelsExternalCalibration&&std::string_view(option.key)=="AutomaticCalibration"?0:nativeOptionIndex(settings,option,labelsButtons);write<int>(spinner,offset(spinner,L"SelectedIndex",2024),index);write<int>(spinner,offset(spinner,L"DefaultValue",2200),nativeOptionIndex(Settings{},option,labelsButtons));
+  int index=menuOptionIndex(settings,option);write<int>(spinner,offset(spinner,L"SelectedIndex",2024),index);write<int>(spinner,offset(spinner,L"DefaultValue",2200),menuOptionIndex(Settings{},option));
   auto slot=field(row,L"SettingValue",2040);if(!slot||!a.setContent(slot,spinner)||!a.addChild(page,row))throw std::runtime_error("Cannot attach gyro row");
   call(spinner,L"SetSelectedIndexWithoutEnabledCheck",&index,sizeof(index));
   rows.push_back({row,spinner,&option,index});
@@ -158,7 +285,7 @@ void refreshRows(Obj target,const Settings& settings){
   if(cachedOurs)write<Obj>(target,offset(target,L"LastFocusedWidget",2536),rows[selected].widget);
   if(hadFocus&&active)a.setFocus(rows[selected].widget);
  }else for(auto& row:rows)if(optionFamily(*row.option)){
-  int selected=nativeOptionIndex(settings,*row.option,labelsButtons);row.index=selected;
+  int selected=menuOptionIndex(settings,*row.option);row.index=selected;
   populateValues(row.spinner,*row.option,settings);call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&selected,sizeof(selected));
  }
 }
@@ -179,12 +306,15 @@ void attach(Runtime& r,Obj target){
  if(!a.addChild(left,button)){a.removeChild(switcher,page);throw std::runtime_error("Cannot attach gyro category");}
  pageLayout(page,field(target,L"SetupSettingsScrollBox",2264));
  controller=target;controllerIndex=read<int>(target,12);controllerSerial=read<int>(item(controllerIndex),16);
+ trackCalibrationMenu(root);
  attachCalibrationPrompt(target);
  r.log("Native Gyro Configuration attached: "+std::to_string(rows.size())+" supported rows and calibration footer; language="+language);
 }
 }
 void nativeMenuTick(Runtime& r){if(failed)return;try{
  if(!initialized){init();initialized=true;}
+ calibrationMenuTick(r);
+ controllerDiagramTick(r);
  if(pendingController){
   if(!validObject(pendingController,pendingIndex,pendingSerial))pendingController=nullptr;
   else if(attachable(pendingController)){auto target=pendingController;pendingController=nullptr;attach(r,target);}
@@ -196,16 +326,20 @@ void nativeMenuTick(Runtime& r){if(failed)return;try{
  if(layout!=labelsLayout||touchpad!=labelsTouchpad||available!=labelsButtons){labelsLayout=layout;labelsTouchpad=touchpad;labelsButtons=available;refreshRows(controller,settings);}
  bool external=r.externalCalibration.load(std::memory_order_acquire);
  if(external!=labelsExternalCalibration){labelsExternalCalibration=external;for(auto& row:rows)if(std::string_view(row.option->key)=="AutomaticCalibration"){
-  populateValues(row.spinner,*row.option,settings);int selected=external?0:nativeOptionIndex(settings,*row.option,labelsButtons);row.index=selected;call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&selected,sizeof(selected));
-  setText(row.widget,L"BodyDescription",localize(external?"calibration.steamHelp":"description.AutomaticCalibration",language));
+  populateValues(row.spinner,*row.option,settings);int selected=menuOptionIndex(settings,*row.option);row.index=selected;call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&selected,sizeof(selected));
  }}
  bool changed=false;for(auto& row:rows){int index=read<int>(row.spinner,2024);
- if(labelsExternalCalibration&&std::string_view(row.option->key)=="AutomaticCalibration"){if(index!=0){int zero=0;call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&zero,sizeof(zero));}row.index=0;continue;}
-if(index!=row.index&&index>=0&&index<nativeOptionCount(settings,*row.option,labelsButtons)){
+if(!steamCalibrationRow(*row.option)&&index!=row.index&&index>=0&&index<menuOptionCount(settings,*row.option)){
  setNativeOptionIndex(settings,*row.option,index,labelsButtons);row.index=index;changed=true;
 
-}else{int desired=nativeOptionIndex(settings,*row.option,labelsButtons);if(desired!=row.index){call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&desired,sizeof(desired));row.index=desired;}}}
+}else{int desired=menuOptionIndex(settings,*row.option);if(desired!=row.index){call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&desired,sizeof(desired));row.index=desired;}}}
  if(changed){r.update(settings);r.log("Native gyro options changed");}
+ auto sampleAt=r.sampleTime.load();auto now=monotonicNs();
+ bool sourceReady=sampleAt&&now>=sampleAt&&now-sampleAt<200'000'000;
+ auto help=localize(external?"calibration.steamHelp":"description.AutomaticCalibration",language);
+ if(!sourceReady)help+="\n\n"+localize("calibration.sourceUnavailable",language);
+ if(help!=calibrationHelp){for(auto& row:rows)if(std::string_view(row.option->key)=="AutomaticCalibration")setText(row.widget,L"BodyDescription",help);calibrationHelp=help;}
+
  }catch(const std::exception& e){failed=true;r.log(e.what());}}
 #ifdef RG_NATIVE_MENU_DIAGNOSTIC
 // Development-only repair of the already attached preview; never used by the production DLL.
@@ -232,6 +366,8 @@ void constructed(Obj widget){
  if(failed)return;
  try{
   if(!initialized){init();initialized=true;}
+  trackCalibrationMenu(widget);
+  try{trackDiagram(widget);}catch(const std::exception& error){diagramFailed=true;runtime->log(std::string("Controller diagram tracking unavailable: ")+error.what());}
   auto cls=read<Obj>(widget,0x10);Obj candidate=nullptr;
   if(cls==findClass(L"/Game/UI/SystemMenu/WBP_ControllerSettings.WBP_ControllerSettings_C"))candidate=widget;
   else if(cls==findClass(L"/Game/UI/SystemMenu/WBP_SystemSettings_3Panel.WBP_SystemSettings_3Panel_C"))candidate=field(widget,L"WBP_ControllerSettings",2336);
@@ -244,7 +380,7 @@ void constructed(Obj widget){
 void restore(Obj target){
  if(!failed&&controller&&target==controller&&validController()&&read<int>(controller,2032)==4){
   auto settings=runtime->snapshot();resetGyroOptions(settings);runtime->update(settings);
-  try{for(auto& row:rows){populateValues(row.spinner,*row.option,settings);int index=nativeOptionIndex(settings,*row.option,labelsButtons);call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&index,sizeof(index));row.index=index;}runtime->log("Native gyro defaults restored");}
+  try{for(auto& row:rows){populateValues(row.spinner,*row.option,settings);int index=menuOptionIndex(settings,*row.option);call(row.spinner,L"SetSelectedIndexWithoutEnabledCheck",&index,sizeof(index));row.index=index;}runtime->log("Native gyro defaults restored");}
   catch(const std::exception& error){failed=true;runtime->log(error.what());}
   return;
  }
@@ -261,7 +397,8 @@ bool installNativeMenu(Runtime& r){
   struct Hook{void* target;void* detour;void** original;};
   Hook hooks[]={{drawTarget,reinterpret_cast<void*>(menuDraw),reinterpret_cast<void**>(&originalDraw)},
    {restoreTarget,reinterpret_cast<void*>(restore),reinterpret_cast<void**>(&originalRestore)},
-   {constructTarget,reinterpret_cast<void*>(constructed),reinterpret_cast<void**>(&originalConstruct)}};
+   {constructTarget,reinterpret_cast<void*>(constructed),reinterpret_cast<void**>(&originalConstruct)}
+  };
   size_t created=0;for(auto& hook:hooks){if(MH_CreateHook(hook.target,hook.detour,hook.original)!=MH_OK){for(size_t i=0;i<created;++i)MH_RemoveHook(hooks[i].target);throw std::runtime_error("Native menu hook creation failed");}++created;}
   for(auto& hook:hooks)MH_QueueEnableHook(hook.target);
   if(MH_ApplyQueued()!=MH_OK){for(auto& hook:hooks)MH_DisableHook(hook.target);throw std::runtime_error("Native menu hook activation failed");}

@@ -1,6 +1,6 @@
 # Returnal Native Gyro + Mixed Input
 
-Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.3**.
+Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.4**.
 
 ## Install
 
@@ -16,6 +16,8 @@ Existing `ReturnalGyro.ini` settings survive updates; defaults are created when 
 - Without Steam Input: automatic selection falls back to passive Sony HID or SDL motion sensors. For direct sensors, the native settings footer offers recalibration after a five-second countdown. Place the controller on a stable surface.
 - Physically tested during development: DualSense Edge over USB, original Steam Controller over USB, and Steam Controller 2 via its Puck. Other transports/controllers, including Steam Deck built-in controls, are not certified.
 
+The motion source is selected automatically at startup. Restart Returnal after changing Steam Input; switching sources during a session is not supported.
+
 Only supported control families are shown: buttons, touchpads, capacitive stick/grip contacts and analog stick deflection. Left/right/either/both are available where supported. In automatic activation modes, the selected controls suspend gyro; Hold to Enable and Toggle use them to activate it.
 
 Selected game buttons respond to a tap shorter than 200 ms on release; gyro responds immediately. Native hold interactions, item scans and timed pickups keep their full hold, including remapped interaction buttons. Touch contact and analog deflection are separate from clicks.
@@ -25,7 +27,9 @@ Selected game buttons respond to a tap shorter than 200 ms on release; gyro resp
 - Native angular camera input, with no gyro-to-mouse emulation.
 - Player Space, World Space, Local Yaw and Local Roll.
 - Aim-command activation, independent sensitivity axes and aim/Alt-Fire multipliers.
-- Optional smoothing/acceleration presets and Flick Stick.
+- Exponential gyro smoothing from 0 to 500 ms in 5 ms steps, acceleration presets and Flick Stick.
+- Automatic calibration: Off, Menus Only or Any Time for direct sensors; Steam retains calibration ownership for Steam motion.
+- Controller-family button prompts and controller illustrations, including Nintendo and DualSense through Steam Input.
 - Mixed-input guards for controller presentation and mouse-triggered rumble interruption.
 - Native game menu in English, French, German, Spanish, Italian and Portuguese.
 
@@ -33,7 +37,7 @@ Selected game buttons respond to a tap shorter than 200 ms on release; gyro resp
 
 Targets the Windows Steam build **11083317 / UE 4.25.1** with matching modules. Other builds are rejected by validation. This is an unofficial mod; no game files are included.
 
-Sixteen automated test suites pass. The orientation recovery fix introduced in 0.7.4 is validated offline; confirmation of the originally reported intermittent symptom in gameplay is still pending.
+Eighteen automated test suites pass. The orientation recovery fix introduced in 0.7.4 is validated offline; confirmation of the originally reported intermittent symptom in gameplay is still pending.
 
 Some antivirus engines flagged the 0.7.4 runtime. These reports have not been cleared by the vendors; a false positive is suspected, not confirmed. Report the exact file hash, engine and detection label. Do not disable antivirus protection to install the mod.
 

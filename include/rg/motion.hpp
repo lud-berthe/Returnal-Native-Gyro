@@ -21,12 +21,14 @@ struct GyroSample {
     std::uint32_t buttons{};
     float rightStickMagnitude{},leftStickMagnitude{};
 };
-struct GameplayState { bool allowed{},aiming{},altFire{},overlay{},aimInputHeld{}; };
+struct GameplayState { bool allowed{},aiming{},altFire{},overlay{},aimInputHeld{},menuOpen{}; };
+enum class CalibrationEvent { None, AutomaticCorrection, ManualComplete };
 enum class CalibrationState { Idle, Collecting, Complete };
 struct MotionDiagnostics {
     Vec3 raw{},calibrated{},bias{},gravity{};
     double sensorHz{};
     CameraDelta delta{};
+    CalibrationEvent calibrationEvent{};
     CalibrationState calibration{};
     float calibrationProgress{};
     bool active{};
@@ -49,15 +51,11 @@ private:
     std::uint64_t previousNs_{};
     bool externalCalibration_{},gravityInitialized_{};
     bool primed_{},previousButton_{},toggled_{true},wasActive_{};
-    int previousActivationMode_{-1},previousSmoothing_{-1};
+    int previousActivationMode_{-1},previousGyroSpace_{-1};
     double calibrationTime_{};
     Vec3 calibrationMean_{},calibrationM2_{};
     unsigned calibrationCount_{};
-    struct SmoothSegment {double duration{};CameraDelta velocity{};};
-    std::array<SmoothSegment,4096> smoothing_{};
-    size_t smoothHead_{},smoothCount_{};
-    double smoothTime_{};
-    CameraDelta smoothIntegral_{};
+    CameraDelta filteredVelocity_{};
     void clearSmoothing();
     CameraDelta smooth(CameraDelta velocity,double dt,const Settings&);
 };

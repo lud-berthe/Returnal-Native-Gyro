@@ -3,6 +3,20 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 namespace rg {
+inline ControllerPresentation sdlControllerPresentation(SDL_Gamepad* p){
+ using L=ControllerLayout;using D=ControllerDiagram;
+ switch(SDL_GetGamepadType(p)){
+ case SDL_GAMEPAD_TYPE_PS3:return {L::Sony,D::Native};
+ case SDL_GAMEPAD_TYPE_PS4:return {L::Sony,D::DualShock};
+ case SDL_GAMEPAD_TYPE_PS5:return {L::Sony,D::DualSense};
+ case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+ case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:return {L::Nintendo,D::SwitchPro};
+ case SDL_GAMEPAD_TYPE_XBOX360:return {L::Xbox,D::Xbox360};
+ case SDL_GAMEPAD_TYPE_XBOXONE:return {L::Xbox,D::Xbox};
+ case SDL_GAMEPAD_TYPE_STANDARD:return {L::Xbox,D::Native};
+ default:return {};
+ }
+}
 inline std::uint32_t sdlAvailableButtons(SDL_Gamepad* p){
  std::uint32_t result=0;
  const std::pair<SDL_GamepadButton,int> mapping[]={{SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,1},{SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,2},{SDL_GAMEPAD_BUTTON_LEFT_STICK,3},{SDL_GAMEPAD_BUTTON_RIGHT_STICK,4},{SDL_GAMEPAD_BUTTON_EAST,7},{SDL_GAMEPAD_BUTTON_WEST,10},{SDL_GAMEPAD_BUTTON_NORTH,11},{SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,20},{SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,21},{SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,22},{SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,23}};

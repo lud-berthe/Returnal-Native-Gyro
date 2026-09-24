@@ -13,6 +13,7 @@ struct Runtime {
     std::mutex settingsMutex, diagnosticsMutex, logMutex;
     Settings settings;
     std::atomic<unsigned> revision{1}, calibrationCommand{}, gameFlags{}, blockedReasons{}, mixedFlags{3};
+    std::atomic<std::uint64_t> calibrationMenuAt{}, calibrationUiMenuAt{};
     std::atomic<std::uint64_t> gameTime{}, sampleTime{}, motionEpoch{1}, suppressed{}, inputCalls{}, cameraCalls{}, queueDrops{};
     DWORD externalHostPid{};
     std::atomic<std::uint64_t> panelFrames{};
@@ -26,10 +27,12 @@ struct Runtime {
     std::atomic<bool> toggleEnabled{true};
     std::atomic<float> flickYaw{},flickX{},flickY{};
     std::atomic<unsigned> flickSuppressed{};
-    std::atomic<ControllerLayout> controllerLayout{ControllerLayout::Sony};
+    std::atomic<ControllerLayout> controllerLayout{ControllerLayout::Generic};
+    std::atomic<ControllerDiagram> controllerDiagram{ControllerDiagram::Native};
     std::atomic<bool> controllerTouchpad{};
     std::atomic<std::uint32_t> availableButtons{};
     std::atomic<bool> externalCalibration{};
+    std::atomic<std::uint64_t> controllerIdentityAt{};
     std::atomic<std::uint32_t> controllerButtons{};
     Settings snapshot();
     void update(const Settings&);

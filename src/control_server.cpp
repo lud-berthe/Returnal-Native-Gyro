@@ -6,14 +6,13 @@ void controlLoop(Runtime& r){
     auto pid=GetCurrentProcessId();SettingsChannel channel(pid,true);
     if(!channel.valid()){r.log("Settings communication unavailable; native/mixed hooks remain loaded");return;}
     {auto state=channel.lock();if(!state)return;*state=SharedSettings{};state->magic=settingsMagic;state->abi=settingsAbi;state->gamePid=pid;sharedText(state->initialConfig,serializeConfig(r.snapshot()));}
-    bool oldF9=false,oldF10=false;unsigned lastRequest=0,observedRevision=r.revision.load(),savedRevision=observedRevision;ULONGLONG lastChange=GetTickCount64();
-    r.log("Control service ready: native settings; F9 calibrate; F10 suspend.");
+    bool oldF10=false;unsigned lastRequest=0,observedRevision=r.revision.load(),savedRevision=observedRevision;ULONGLONG lastChange=GetTickCount64();
+    r.log("Control service ready: native settings; controller-menu calibration; F10 suspend.");
     for(;;){
         DWORD foreground{};GetWindowThreadProcessId(GetForegroundWindow(),&foreground);bool focused=foreground==pid;
-        bool f9=(GetAsyncKeyState(VK_F9)&0x8000)!=0,f10=(GetAsyncKeyState(VK_F10)&0x8000)!=0;
-        if(focused&&f9&&!oldF9)r.calibrationCommand=1;
+        bool f10=(GetAsyncKeyState(VK_F10)&0x8000)!=0;
         if(focused&&f10&&!oldF10){r.suspended=!r.suspended.load();r.log(r.suspended?"Mod suspended":"Mod resumed");}
-        oldF9=f9;oldF10=f10;
+        oldF10=f10;
         {
             auto state=channel.lock();
             if(state){

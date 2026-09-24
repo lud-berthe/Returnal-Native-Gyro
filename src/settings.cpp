@@ -45,6 +45,14 @@ ConfigResult parseConfig(std::string_view text) {
             r.warnings.emplace_back("Invalid "+std::string(key)+"; restored default");
         } else field->set(r.settings,value);
     }
+    if(!seen.contains("ConfigVersion")||r.settings.ConfigVersion<4){
+        constexpr int milliseconds[]={0,20,40,80};
+        if(r.settings.Smoothing<=3)r.settings.Smoothing=milliseconds[r.settings.Smoothing];
+        else {r.settings.Smoothing=0;r.warnings.emplace_back("Invalid legacy Smoothing preset; restored Off");}
+    }else if(r.settings.Smoothing%5){
+        r.settings.Smoothing=static_cast<int>(std::lround(r.settings.Smoothing/5.0))*5;
+        r.warnings.emplace_back("Smoothing rounded to nearest 5 ms");
+    }
     const int legacyActivationMode=r.settings.ActivationMode;
     if(r.settings.ActivationMode==4)r.settings.ActivationMode=0;
     if(!seen.contains("ConfigVersion")||r.settings.ConfigVersion<2){
@@ -66,7 +74,7 @@ ConfigResult parseConfig(std::string_view text) {
     validateFamily(r.settings.GyroStickSensor,{0,14,15,16,25});
     validateFamily(r.settings.GyroGripSensor,{0,17,18,19,26});
     validateFamily(r.settings.GyroStick,{0,3,4,27,28});
-    r.settings.ActivationButton=0;r.settings.RatchetButton=0;r.settings.LinkXY=false;r.settings.ConfigVersion=3;r.settings.DisableWhileRightStick=false;
+    r.settings.ActivationButton=0;r.settings.RatchetButton=0;r.settings.LinkXY=false;r.settings.ConfigVersion=4;r.settings.DisableWhileRightStick=false;
     if(r.settings.AccelerationEndDps<=r.settings.AccelerationStartDps){
         r.settings.AccelerationStartDps=0;r.settings.AccelerationEndDps=75;
         r.warnings.emplace_back("Invalid acceleration interval; restored 0..75 deg/s");
@@ -75,7 +83,7 @@ ConfigResult parseConfig(std::string_view text) {
 }
 std::string serializeConfig(const Settings& s) {
     std::ostringstream o;o.precision(8);
-    o<<"; Returnal Native Gyro - values apply live unless marked restart required.\n; Booleans: 0 Off, 1 On. Manual calibration: F9 while the controller is stationary.\n[ReturnalGyro]\n";
+    o<<"; Returnal Native Gyro - values apply live unless marked restart required.\n; Booleans: 0 Off, 1 On. Manual calibration: use the controller prompt in Gyro Configuration.\n[ReturnalGyro]\n";
     for(const auto& f:settingsSchema())o<<"\n; "<<f.description<<'\n'<<f.name<<" = "<<f.get(s)<<'\n';
     return o.str();
 }

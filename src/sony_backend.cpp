@@ -68,7 +68,7 @@ public:
         auto c=candidates[static_cast<size_t>(index)];device_=SDL_hid_open_path(c.path.c_str());
         if(!device_){error_="Cannot open Sony controller with shared HID access";return false;}
         info_={c.name,c.path,0x054c,c.product,c.bluetooth,false};ps5_=c.product==0x0ce6||c.product==0x0df2;
-        info_.layout=ControllerLayout::Sony;info_.touchpad=true;info_.availableButtons=analogStickCapabilities|standardGyroButtons|buttonMask(5)|(c.product==0x0df2?rearGyroButtons:0);
+        info_.diagram=ps5_?ControllerDiagram::DualSense:ControllerDiagram::DualShock;info_.layout=ControllerLayout::Sony;info_.touchpad=true;info_.availableButtons=analogStickCapabilities|standardGyroButtons|buttonMask(5)|(c.product==0x0df2?rearGyroButtons:0);
         factoryCalibration();lastReportNs_=monotonicNs();return true;
     }
     std::optional<GyroSample> read() override {

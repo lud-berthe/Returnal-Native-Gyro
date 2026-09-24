@@ -9,7 +9,7 @@ namespace rg {
 std::span<const GyroOption> gyroOptions(){static constexpr GyroOption options[]={
  {"GyroEnabled",1,2},{"SensitivityX",.05,201},{"SensitivityY",.05,201},{"AimMultiplier",.05,201},{"AltFireMultiplier",.05,201},
  {"GyroSpace",1,4},{"ActivationMode",1,5},{"ActivationButton",1,static_cast<int>(activationButtonOrder.size())},{"DisableWhileRightStick",1,2},{"InvertX",1,2},{"InvertY",1,2},
- {"AutomaticCalibration",1,2},{"Smoothing",1,4},{"Acceleration",1,4},{"FlickStick",1,3},{"FlickSpinDurationMs",10,101}};return options;}
+ {"AutomaticCalibration",1,3},{"Smoothing",5,101},{"Acceleration",1,4},{"FlickStick",1,3},{"FlickSpinDurationMs",10,101}};return options;}
 std::span<const GyroOption> nativeGyroOptions(){static const auto options=[](){std::vector<GyroOption> result;for(auto& o:gyroOptions()){if(std::string_view(o.key)=="DisableWhileRightStick")continue;if(std::string_view(o.key)=="ActivationButton"){result.push_back({"GyroButton",1,12});result.push_back({"GyroTouchpad",1,5});result.push_back({"GyroStickSensor",1,5});result.push_back({"GyroGripSensor",1,5});result.push_back({"GyroStick",1,5});}else result.push_back(o);}return result;}();return options;}
 int bindingFamily(int id){
  if(id==0)return 0;if(id==5||id==12||id==13||id==24)return 2;
@@ -61,12 +61,16 @@ static std::vector<int> buttonChoices(std::uint32_t available){std::vector<int> 
 int optionCount(const GyroOption& option,std::uint32_t available){return std::string_view(option.key)=="ActivationButton"?static_cast<int>(buttonChoices(available).size()):option.count;}
 int optionIndex(const Settings& settings,const GyroOption& option,std::uint32_t available){
  int value=static_cast<int>(std::lround(field(option).get(settings)/option.step));
+ if(std::string_view(option.key)=="AutomaticCalibration")value=value==1?2:value==2?1:0;
  if(std::string_view(option.key)=="ActivationMode")value=value==5?4:value==4?0:value;
  if(std::string_view(option.key)=="ActivationButton"){auto ids=buttonChoices(available);auto it=std::find(ids.begin(),ids.end(),value);return it==ids.end()?0:static_cast<int>(it-ids.begin());}
  return std::clamp(value,0,option.count-1);
 }
 void setOptionIndex(Settings& settings,const GyroOption& option,int index,std::uint32_t available){
  index=std::clamp(index,0,optionCount(option,available)-1);double value=index*option.step;
+ if(std::string_view(option.key)=="AutomaticCalibration"){
+  value=index==1?2:index==2?1:0;
+ }
  if(std::string_view(option.key)=="ActivationMode"&&index==4)value=5;
  if(std::string_view(option.key)=="ActivationButton")value=buttonChoices(available)[index];
  field(option).set(settings,value);settings.LinkXY=false;settings.RatchetButton=0;
@@ -90,12 +94,14 @@ std::string buttonLabel(int id,std::string_view language,ControllerLayout layout
 }
 std::string optionValue(const GyroOption& option,int index,std::string_view language,ControllerLayout layout,bool touchpad,std::uint32_t available){index=std::clamp(index,0,optionCount(option,available)-1);std::string_view key=option.key;
  if(key=="FlickSpinDurationMs")return std::to_string(static_cast<int>(index*option.step))+" ms";
+ if(key=="AutomaticCalibration"){const char* keys[]={"off","calibration.menus","calibration.anytime"};return localize(keys[index],language);}
  if(key=="FlickStick"){const char* keys[]={"off","mode.hip","on"};return localize(keys[index],language);}
  if(option.step<1){std::ostringstream out;out<<std::fixed<<std::setprecision(2)<<index*option.step;return out.str();}
  if(key=="GyroSpace"){const char* keys[]={"space.player","space.yaw","space.roll","space.world"};return localize(keys[index],language);}
  if(key=="ActivationMode"){const char* keys[]={"mode.always","mode.aim","mode.hip","mode.hold","mode.toggle"};return localize(keys[index],language);}
  if(key=="ActivationButton")return buttonLabel(buttonChoices(available)[index],language,layout,touchpad);
- if(key=="Smoothing"||key=="Acceleration"){const char* keys[]={"off","low","medium","high"};return localize(keys[index],language);}
+ if(key=="Smoothing")return index?std::to_string(static_cast<int>(index*option.step))+" ms":localize("off",language);
+ if(key=="Acceleration"){const char* keys[]={"off","low","medium","high"};return localize(keys[index],language);}
  return localize(index?"on":"off",language);
 }
 }

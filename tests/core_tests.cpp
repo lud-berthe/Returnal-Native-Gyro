@@ -36,11 +36,38 @@ int main(){try {
     GamepadMotion::CalculatePlayerSpaceGyro(pitch,yaw,3,0,10,0,0,1);near(std::abs(yaw),10,1e-5,"Player Space upright roll");
     s=baseline();s.TighteningDps=2;
     near(run(s,{0,-1,0},steps).yawDegrees,0.5,1e-5,"tightening continuous gain");require(run(s,{0,-0.001f,0},steps).yawDegrees>0,"tightening not deadzone");
-    s.TighteningDps=0;s.Smoothing=true;s.SmoothingThresholdDps=2;
-    near(run(s,{0,-10,0},steps).yawDegrees,10,1e-6,"fast input unsmoothed");
-    s.Smoothing=false;near(run(s,{0,-1,0},steps).yawDegrees,1,1e-6,"smoothing disabled raw");
+    s.TighteningDps=0;s.Smoothing=0;
+    near(run(s,{0,-1,0},steps).yawDegrees,1,1e-6,"smoothing disabled raw");
     double previous=1;
-    for(int level=0;level<=3;++level){s.Smoothing=level;double response=run(s,{0,-.1f,0},std::vector<double>(10,.001)).yawDegrees;require(response>0&&response<previous,"stronger smoothing softens slow onset without a cutoff");previous=response;near(run(s,{0,-10,0},steps).yawDegrees,10,1e-6,"every preset bypasses fast motion");}
+    for(int ms:{0,5,50,250,500}){s.Smoothing=ms;double response=run(s,{0,-.1f,0},std::vector<double>(10,.001)).yawDegrees;require(response>0&&response<previous,"larger time constant softens onset without a cutoff");previous=response;}
+    // Closed-form step response at the same elapsed time, for different sample
+    // schedules. Recover velocity from the emitted camera delta, not internals.
+    for(auto intervals:{std::vector<double>(100,.001),std::vector<double>(10,.010),std::vector<double>{.003,.017,.025,.005,.030,.020}}){
+      s=baseline();s.Smoothing=50;s.SensitivityX=6;s.SensitivityY=4;
+      rg::MotionProcessor p;rg::GyroSample input;input.accelG={0,1,0};
+      p.process(input,s,{true});input.sensorNs=1'000'000;p.process(input,s,{true});
+      input.degreesPerSecond={20,-100,0};rg::CameraDelta last;
+      for(double dt:intervals){input.sensorNs+=static_cast<std::uint64_t>(std::llround(dt*1e9));last=p.process(input,s,{true});}
+      near(last.yawDegrees/(intervals.back()*6),100*(1-std::exp(-2.0)),1e-9,"fast yaw follows 50ms exponential at every sample rate");
+      near(last.pitchDegrees/(intervals.back()*4),20*(1-std::exp(-2.0)),1e-9,"pitch uses same time constant before independent sensitivity");
+      input.degreesPerSecond={};input.sensorNs+=50'000'000;last=p.process(input,s,{true});
+      near(last.yawDegrees/(.05*6),100*(1-std::exp(-2.0))*std::exp(-1.0),1e-9,"stationary decay follows time constant");
+      s.Smoothing=500;input.sensorNs+=50'000'000;last=p.process(input,s,{true});
+      near(last.yawDegrees/(.05*6),100*(1-std::exp(-2.0))*std::exp(-1.1),1e-9,"changing tau preserves filter state");
+      s.GyroEnabled=false;input.sensorNs+=1'000'000;near(p.process(input,s,{true}).yawDegrees,0,1e-12,"disable clears smoothing tail immediately");
+      s.GyroEnabled=true;input.sensorNs+=1'000'000;p.process(input,s,{true});input.sensorNs+=1'000'000;
+      near(p.process(input,s,{true}).yawDegrees,0,1e-12,"reactivation never replays old smoothing tail");
+    }
+    s=baseline();
+    for(int level=0;level<=3;++level){
+      auto cfg=rg::parseConfig("ConfigVersion=3\nSmoothing="+std::to_string(level)+"\nSensitivityX=6\n");
+      const int expected[]={0,20,40,80};require(cfg.settings.Smoothing==expected[level]&&cfg.settings.ConfigVersion==4,"legacy presets migrate to milliseconds once");
+      require(rg::parseConfig(rg::serializeConfig(cfg.settings)).settings.Smoothing==expected[level],"milliseconds survive config reload");
+      near(cfg.settings.SensitivityX,6,1e-9,"smoothing migration preserves other settings");
+    }
+    require(rg::parseConfig("ConfigVersion=4\nSmoothing=500\n").settings.Smoothing==500,"maximum smoothing accepted");
+    require(rg::parseConfig("ConfigVersion=4\nSmoothing=503\n").settings.Smoothing==0,"out of range smoothing rejected");
+    require(rg::parseConfig("ConfigVersion=4\nSmoothing=13\n").settings.Smoothing==15,"manual duration quantized to 5ms");
     s.Smoothing=0;s.Acceleration=3;s.SensitivityX=0;s.SensitivityY=2;near(run(s,{75,0,0},steps).pitchDegrees,450,1e-5,"acceleration preserves Y even with X zero");s=baseline();
     rg::MotionProcessor ratchet;rg::GyroSample sample;sample.degreesPerSecond={0,-10,0};s.ActivationButton=1;
     for(int i=0;i<10;++i){sample.sensorNs=i*1'000'000ull;ratchet.process(sample,s,{true});}

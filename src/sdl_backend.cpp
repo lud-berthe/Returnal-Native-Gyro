@@ -33,12 +33,7 @@ public:
             if(!SDL_SetGamepadSensorEnabled(p,SDL_SENSOR_ACCEL,true)||!SDL_SetGamepadSensorEnabled(p,SDL_SENSOR_GYRO,true)){error_=SDL_GetError();SDL_CloseGamepad(p);return false;}
             pad_=p;id_=id;const char* name=SDL_GetGamepadName(p);const char* path=SDL_GetGamepadPath(p);
             info_={name?name:"SDL gamepad",path?path:"",SDL_GetGamepadVendor(p),SDL_GetGamepadProduct(p),SDL_GetGamepadConnectionState(p)==SDL_JOYSTICK_CONNECTION_WIRELESS,true};
-            switch(SDL_GetGamepadType(p)){
-            case SDL_GAMEPAD_TYPE_PS3:case SDL_GAMEPAD_TYPE_PS4:case SDL_GAMEPAD_TYPE_PS5:info_.layout=ControllerLayout::Sony;break;
-            case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:info_.layout=ControllerLayout::Nintendo;break;
-            case SDL_GAMEPAD_TYPE_XBOX360:case SDL_GAMEPAD_TYPE_XBOXONE:case SDL_GAMEPAD_TYPE_STANDARD:info_.layout=ControllerLayout::Xbox;break;
-            default:info_.layout=ControllerLayout::Generic;break;
-            }
+            auto presentation=sdlControllerPresentation(p);info_.layout=presentation.layout;info_.diagram=presentation.diagram;
             info_.touchpad=SDL_GetNumGamepadTouchpads(p)>0;info_.availableButtons=sdlAvailableButtons(p);
             accelTime_=0;error_.clear();return true;
         }
