@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- Fix periodic gyro camera pauses with Steam Controllers: HID device discovery and opening now run in the background instead of blocking motion polling every two seconds.
+- Keep grip and trackpad contacts responsive during discovery, including contact releases, while preserving disconnect detection and controller association checks.
+- Add regression coverage for slow discovery, contact freshness, reconnection and cleanup. The periodic camera pause fix was confirmed in game.
+
 ## 1.0.2
 
 - Fix the gyro button blocking hold-to-scan prompts: discovery uses its own selected target and the game's current Discover button mapping.

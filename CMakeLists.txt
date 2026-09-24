@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ReturnalGyro VERSION 1.0.2 LANGUAGES C CXX ASM_MASM)
+project(ReturnalGyro VERSION 1.0.3 LANGUAGES C CXX ASM_MASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -48,3 +48,6 @@ gyro_test(SteamAssociationTests SteamAssociation tests/steam_association_tests.c
 gyro_test(OrientationTests MotionOrientationRecovery tests/orientation_tests.cpp)
 add_executable(VersionProxyTest tools/version_proxy_test.cpp)
 add_test(NAME VersionProxy COMMAND VersionProxyTest $<TARGET_FILE:ReturnalLoader>)
+gyro_test(SteamContactReaderTests SteamContactDiscovery tests/steam_contact_reader_tests.cpp)
+target_link_libraries(SteamContactReaderTests PRIVATE SDL3::Headers)
+set_tests_properties(SteamContactDiscovery PROPERTIES TIMEOUT 15)
