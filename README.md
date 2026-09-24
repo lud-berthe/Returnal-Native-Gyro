@@ -37,6 +37,8 @@ Selected game buttons respond to a tap shorter than 200 ms on release; gyro resp
 
 Targets the Windows Steam build **11083317 / UE 4.25.1** with matching modules. Other builds are rejected by validation. This is an unofficial mod; no game files are included.
 
+If running on Linux using Proton, add `WINEDLLOVERRIDES="version=n,b" %command%` to your Steam launch options to allow the mod DLLs to load.
+
 Eighteen automated test suites pass. The orientation recovery fix introduced in 0.7.4 is validated offline; confirmation of the originally reported intermittent symptom in gameplay is still pending.
 
 Some antivirus engines flagged the 0.7.4 runtime. These reports have not been cleared by the vendors; a false positive is suspected, not confirmed. Report the exact file hash, engine and detection label. Do not disable antivirus protection to install the mod.
