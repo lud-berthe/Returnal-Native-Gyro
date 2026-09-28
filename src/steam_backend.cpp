@@ -3,6 +3,7 @@
 #include "rg/steam_association.hpp"
 #include "rg/sdl_controls.hpp"
 #include "rg/steam_contact_reader.hpp"
+#include "rg/steam_hid_hotplug.hpp"
 #include <algorithm>
 #include <array>
 #include <vector>
@@ -98,4 +99,17 @@ std::optional<ControllerPresentation> steamPresentation(int index){
  return presentation;
 }
 std::unique_ptr<MotionBackend> makeSteamBackend(){return std::make_unique<SteamBackend>();}
+std::optional<std::uint32_t> steamVirtualHidMask(){
+ auto& api=steam();if(!api.initialize())return {};api.update();
+ std::array<std::uint64_t,16> handles{};int count=api.controllers(handles.data());
+ if(count<0||count>16)return {};
+ std::uint32_t mask{};
+ for(int i=0;i<count;++i){
+  auto handle=handles[i];if(!handle)continue;
+  int slot=api.slot(handle);
+  auto reverse=slot>=0&&slot<4?api.controllerForSlot(slot):0;
+  if(steamHasVirtualSlot(handle,slot,reverse))mask=1;
+ }
+ return mask;
+}
 }

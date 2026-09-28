@@ -32,7 +32,7 @@ struct Runtime {
     std::atomic<bool> controllerTouchpad{};
     std::atomic<std::uint32_t> availableButtons{};
     std::atomic<bool> externalCalibration{};
-    std::atomic<std::uint64_t> controllerIdentityAt{};
+    std::atomic<std::uint64_t> controllerIdentityAt{}, deviceGeneration{};
     std::atomic<std::uint32_t> controllerButtons{};
     Settings snapshot();
     void update(const Settings&);

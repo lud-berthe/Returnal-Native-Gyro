@@ -1,6 +1,6 @@
 # Returnal Native Gyro + Mixed Input
 
-Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.4**.
+Native gyro aiming, Flick Stick and simultaneous mouse/controller input for Returnal on Windows. Version **1.0.5**.
 
 ## Install
 
@@ -16,7 +16,7 @@ Existing `ReturnalGyro.ini` settings survive updates; defaults are created when 
 - Without Steam Input: automatic selection falls back to passive Sony HID or SDL motion sensors. For direct sensors, the native settings footer offers recalibration after a five-second countdown. Place the controller on a stable surface.
 - Physically tested during development: DualSense Edge over USB, original Steam Controller over USB, and Steam Controller 2 via its Puck. Other transports/controllers, including Steam Deck built-in controls, are not certified.
 
-The motion source is selected automatically at startup. Restart Returnal after changing Steam Input; switching sources during a session is not supported.
+The motion source is selected automatically and rediscovered when the controller disconnects or switches between native input and Steam Input. Hotplug, input ownership and audio stability were validated with a DualSense Edge over USB. The Steam HID visibility recovery is guarded for the inspected Windows Steam overlay build; unsupported overlay versions are left unchanged and may still require a game restart.
 
 Only supported control families are shown: buttons, touchpads, capacitive stick/grip contacts and analog stick deflection. Left/right/either/both are available where supported. In automatic activation modes, the selected controls suspend gyro; Hold to Enable and Toggle use them to activate it.
 
@@ -39,7 +39,7 @@ Targets the Windows Steam build **11083317 / UE 4.25.1** with matching modules. 
 
 If running on Linux using Proton, add `WINEDLLOVERRIDES="version=n,b" %command%` to your Steam launch options to allow the mod DLLs to load.
 
-Eighteen automated test suites pass. The orientation recovery fix introduced in 0.7.4 is validated offline; confirmation of the originally reported intermittent symptom in gameplay is still pending.
+Twenty automated test suites pass. The orientation recovery fix introduced in 0.7.4 is validated offline; confirmation of the originally reported intermittent symptom in gameplay is still pending.
 
 Some antivirus engines flagged the 0.7.4 runtime. These reports have not been cleared by the vendors; a false positive is suspected, not confirmed. Report the exact file hash, engine and detection label. Do not disable antivirus protection to install the mod.
 

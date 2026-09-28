@@ -201,6 +201,12 @@ void attachCalibrationPrompt(Obj target){
 }
 void calibrationTick(Runtime& r){
  if(!calibrationPrompt)return;
+ static std::uint64_t generation=0;
+ auto currentGeneration=r.deviceGeneration.load(std::memory_order_acquire);
+ if(generation!=currentGeneration){
+  generation=currentGeneration;calibrationCountdown.cancel();calibrationWaiting=calibrationCollecting=false;
+  calibrationCompletedAt=0;calibrationWasDown=true;calibrationLabel.clear();
+ }
  if(r.externalCalibration.load(std::memory_order_acquire)){calibrationCountdown.cancel();calibrationWaiting=calibrationCollecting=false;calibrationCompletedAt=0;calibrationWasDown=true;calibrationPromptActive=false;a.visibility(calibrationPrompt,1);return;}
  auto sampleAt=r.sampleTime.load();auto sensorNow=monotonicNs();
  bool connected=sampleAt&&sensorNow>=sampleAt&&sensorNow-sampleAt<200'000'000;

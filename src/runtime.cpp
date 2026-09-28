@@ -2,51 +2,71 @@
 #include "rg/process_identity.hpp"
 #include "rg/motion_session.hpp"
 #include "rg/calibration_policy.hpp"
+#include "rg/steam_hid_hotplug.hpp"
+#include "rg/native_input_owner.hpp"
 #include <thread>
 #include <sstream>
 #include <iomanip>
 namespace rg {
 void sensorLoop(Runtime& r){
     auto settings=r.snapshot();unsigned revision=r.revision.load();
-    // Source is automatic and locked by AutoBackend after the first connection.
+    // Rediscover automatically after controller loss; never replace a live stream.
     const int deviceIndex=settings.DeviceIndex;
     auto backend=makeMotionBackend(0);
     MotionProcessor processor;MotionSession motionSession;bool wasActive=false;std::uint64_t epoch=1;
     std::uint64_t lastPublish=0,lastLog=0;std::string previousError;
+    bool streamReady=false;
+    SteamHidHotplug steamHotplug;
     for(;;){
+        auto hotplug=steamHotplug.update(monotonicNs());
+        if(hotplug.unsupported)r.log("Steam HID hotplug refresh unavailable for this overlay build; leaving Steam filter unchanged");
+        if(hotplug.rediscover){
+            std::ostringstream message;message<<"Steam HID policy updated: cached="<<hotplug.before<<" target="<<hotplug.after<<" refreshed="<<hotplug.refreshed<<"; rediscovering controller";
+            r.log(message.str());
+            // Existing HID handles can keep producing reports even when Steam
+            // takes ownership. Release them once, only on a policy transition.
+            backend.reset();backend=makeMotionBackend(0);
+        }
         auto nextRevision=r.revision.load(std::memory_order_acquire);
         if(revision!=nextRevision){
             settings=r.snapshot();revision=nextRevision;
         }
         if(!backend->connected()){
-            r.sensorActive=false;r.sampleTime=0;r.controllerButtons=0;r.availableButtons=0;r.controllerTouchpad=false;wasActive=false;r.motionEpoch=++epoch;
+            if(streamReady){
+                r.log("Motion device disconnected; rediscovering Steam/direct source: "+backend->error());
+                streamReady=false;r.deviceGeneration.fetch_add(1,std::memory_order_release);
+            }
+            r.sensorActive=false;r.sampleTime=0;r.controllerButtons=0;
+            r.calibrationCommand=0;wasActive=false;r.motionEpoch=++epoch;
+            // Retain presentation until a replacement stream is confirmed. Input
+            // gates use sampleTime, so old capabilities cannot intercept buttons.
             if(!backend->connect(deviceIndex)){
                 auto error=backend->error();if(error!=previousError){r.log(error);previousError=error;}
                 {std::lock_guard lock(r.diagnosticsMutex);r.device=error;r.diagnostics={};}
-                // Metadata only: a missing direct sensor must not default to Sony icons.
-                auto identity=steamPresentation(deviceIndex);
-                r.controllerLayout.store(identity?identity->layout:ControllerLayout::Generic);
-                r.controllerDiagram.store(identity?identity->diagram:ControllerDiagram::Native);
-                r.controllerIdentityAt.store(identity?monotonicNs():0,std::memory_order_release);
-                Sleep(1000);continue;
+                Sleep(250);continue;
             }
-            previousError.clear();auto info=backend->info();
+        }
+        auto sample=backend->read();if(!sample)continue;
+        if(!streamReady){
+            auto info=backend->info();previousError.clear();
             if(motionSession.reconnect(info.path,info.externalCalibration,monotonicNs())){
                 processor.resumeDevice();r.log("Motion orientation preserved: same Steam controller resumed within 2 seconds; timing and queued motion cleared");
             }else{
                 processor.resetDevice();r.log("Motion orientation reset: initial/new device, calibration owner change or expired stream; fresh acceleration will initialize gravity");
             }
-            processor.setExternalCalibration(info.externalCalibration);r.externalCalibration.store(info.externalCalibration,std::memory_order_release);
+            processor.setExternalCalibration(info.externalCalibration);
+            r.calibrationCommand=0;r.externalCalibration.store(info.externalCalibration,std::memory_order_release);
             r.log(info.externalCalibration?"Calibration owner: Steam Input; mod manual/automatic calibration bypassed":"Calibration owner: mod (direct sensor)");
-            r.controllerIdentityAt.store(monotonicNs(),std::memory_order_release);r.controllerLayout.store(info.layout);r.controllerDiagram.store(info.diagram);r.controllerTouchpad.store(info.touchpad);
+            r.controllerLayout.store(info.layout);r.controllerDiagram.store(info.diagram);r.controllerTouchpad.store(info.touchpad);
             std::ostringstream message;message<<info.name<<" VID="<<std::hex<<info.vendor<<" PID="<<info.product<<std::dec<<" Bluetooth="<<(info.connectionKnown?std::to_string(info.bluetooth):"unknown")<<" factoryCalibration="<<info.factoryCalibration;
-            r.log(message.str());{std::lock_guard lock(r.diagnosticsMutex);r.device=message.str();}
+            r.log(message.str());{std::lock_guard lock(r.diagnosticsMutex);r.device=message.str();r.diagnostics=processor.diagnostics();}
+            r.deviceGeneration.fetch_add(1,std::memory_order_release);streamReady=true;
         }
+        motionSession.sample(monotonicNs());
         auto command=r.calibrationCommand.exchange(0);
         if(command&&r.externalCalibration.load()){r.log("Calibration request ignored: use Steam Input gyro calibration");command=0;}
         if(command==1){processor.beginCalibration();r.log("Manual calibration started; keep controller still");}
         if(command==2){processor.resetCalibration();r.log("Calibration reset");}
-        auto sample=backend->read();if(!sample)continue;motionSession.sample(monotonicNs());
         auto capabilities=backend->info();r.controllerIdentityAt.store(monotonicNs(),std::memory_order_release);r.controllerLayout.store(capabilities.layout);r.controllerDiagram.store(capabilities.diagram);r.controllerTouchpad.store(capabilities.touchpad);
         auto previousButtons=r.availableButtons.exchange(capabilities.availableButtons);
         if(previousButtons!=capabilities.availableButtons)r.log("Gyro button capabilities="+std::to_string(capabilities.availableButtons));
@@ -66,6 +86,7 @@ void sensorLoop(Runtime& r){
         if(settings.DiagnosticLogging&&now-lastLog>2'000'000'000){
             const auto& d=processor.diagnostics();std::ostringstream out;
             out<<"state frames="<<r.cameraCalls.load()<<" blocked="<<r.blockedReasons.load()<<" flags="<<flags<<" active="<<d.active<<" enabled="<<settings.GyroEnabled<<" activation="<<settings.ActivationMode<<" gyroButton="<<settings.GyroButton<<" gyroPad="<<settings.GyroTouchpad<<" gyroStickSensor="<<settings.GyroStickSensor<<" gyroGrip="<<settings.GyroGripSensor<<" gyroStick="<<settings.GyroStick<<" toggle="<<processor.toggleEnabled()<<" ratchet="<<settings.RatchetButton<<" buttons="<<sample->buttons<<" Hz="<<d.sensorHz<<" gravity="<<d.gravity.x<<","<<d.gravity.y<<","<<d.gravity.z<<" autoCalibration="<<settings.AutomaticCalibration<<" calibrationMenu="<<game.menuOpen<<" bias="<<d.bias.x<<","<<d.bias.y<<","<<d.bias.z<<" calibration="<<static_cast<int>(d.calibration)<<" progress="<<d.calibrationProgress<<" inputCalls="<<r.inputCalls.load()<<" suppressed="<<r.suppressed.load()<<" HUD="<<r.presentation.load()<<" camera="<<r.controlYaw.load()<<","<<r.controlPitch.load()<<" applied="<<r.appliedYaw.load()<<","<<r.appliedPitch.load()<<" dropped="<<r.queueDrops.load()<<" flick="<<settings.FlickStick<<" flickXY="<<r.flickX.load()<<","<<r.flickY.load()<<" flickYaw="<<r.flickYaw.load()<<" stickSuppressed="<<r.flickSuppressed.load();
+            out<<" steamOwnsInput="<<steamInputOwnsGamepad()<<" nativeSuppressed="<<nativeInputSuppressed()<<" nativeIdentitySuppressed="<<nativeIdentitySuppressed();
             r.log(out.str());lastLog=now;
         }
     }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+- Recover gyro after controller disconnection or a switch between native input and Steam Input, without replacing a healthy motion stream. Clear stale motion, button and calibration state during handoff.
+- Restore native controller detection after disabling Steam Input on the supported Windows Steam overlay build. Verify virtual gamepad ownership before handing control to Steam.
+- Prevent duplicate native/Steam button and stick inputs, and release previously held native inputs once during takeover.
+- Fix audio crackling and dropouts with Steam Input: native controller-usage notifications no longer compete with Steam and repeatedly recreate Wwise controller audio outputs.
+- Twenty automated test suites pass, including backend recovery and controller identity handoff regressions. Hotplug and the audio correction were validated in game with a DualSense Edge over USB. Existing INI settings are preserved.
+
 ## 1.0.4
 
 - Replace smoothing presets with exponential smoothing adjustable from 0 to 500 ms in 5 ms steps; 0 disables smoothing. Existing presets migrate to equivalent durations.

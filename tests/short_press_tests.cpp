@@ -28,6 +28,15 @@ int main(){try{
  }
  {rg::ShortPressGate g;g.event(0,1,false);check(g.event(0,2,true)==D::Forward,"native press is not captured after gameplay changes");check(g.event(1,3,true)==D::Forward,"native cycle ends without a synthetic tap");}
  {rg::ShortPressGate g;g.event(0,1,true);check(g.event(2,2,true,true)==D::Suppress,"a prompt appearing after a deferred press cannot create an unmatched native repeat");check(g.event(1,1'500'000'001,true,true)==D::Suppress,"old deferred hold cannot turn into a late interaction tap");}
+ // A disconnected controller may never send its button release. The runtime
+ // replaces the gate on a device-generation change instead of just cancelling it.
+ for(bool nativePress:{false,true}){
+  rg::ShortPressGate g;g.event(0,1,true,nativePress);g={};
+  check(g.event(0,10,true)==D::Suppress,"new controller press starts its own deferred cycle");
+  check(g.event(1,100,true)==D::Tap,"new controller tap works without old device release");
+  g.event(0,200,true);g={};check(g.event(1,300,true)==D::Forward,"late old release cannot synthesize an action");
+ }
+ {rg::CalibrationCountdown c;c.start(100);c.cancel();check(!c.tick(6000,true),"device replacement cancels old calibration even if another sensor is ready");}
  // Physical gyro input is processed immediately, before the delayed native action.
  for(int mode:{0,3,5}){
   rg::Settings s;s.ActivationMode=mode;s.ActivationButton=10;s.GyroSpace=1;

@@ -5,6 +5,7 @@
 #include "rg/flick_stick.hpp"
 #include "rg/aim_gate.hpp"
 #include "rg/short_press.hpp"
+#include "rg/native_input_owner.hpp"
 #include <MinHook.h>
 #include <bcrypt.h>
 #include <array>
@@ -218,7 +219,7 @@ bool nativeInteractionHold(Object pc,Bindings::Name key){
 using KeyInput=bool(*)(Object,const void*,int,float,bool);
 KeyInput originalKey{};
 std::array<ShortPressGate,12> buttonGates;
-Object buttonOwner{};std::uint32_t gatedBinding{};
+Object buttonOwner{};std::uint32_t gatedBinding{};std::uint64_t buttonGeneration{};
 bool inputKey(Object pc,const void* key,int event,float amount,bool gamepad){
  auto& r=*runtime;
  if(!key||!reflectionReady.load(std::memory_order_acquire)||!b.is(pc,b.pcClass)||!b.local(pc))return originalKey(pc,key,event,amount,gamepad);
@@ -226,7 +227,8 @@ bool inputKey(Object pc,const void* key,int event,float amount,bool gamepad){
  for(int i:{1,2,3,4,7,10,11})if(keyName==read<Bindings::Name>(const_cast<void*>(b.buttons[i]),0)){id=i;break;}
  if(!id)return originalKey(pc,key,event,amount,gamepad);
  auto settings=r.snapshot();auto now=monotonicNs();
- if(buttonOwner!=pc){buttonGates={};buttonOwner=pc;}
+ auto generation=r.deviceGeneration.load(std::memory_order_acquire);
+ if(buttonOwner!=pc||buttonGeneration!=generation){buttonGates={};buttonOwner=pc;buttonGeneration=generation;}
  if(gatedBinding!=gyroGameButtonSelection(settings,r.availableButtons.load())){for(auto& gate:buttonGates)gate.cancel();gatedBinding=gyroGameButtonSelection(settings,r.availableButtons.load());}
  auto sampleAt=r.sampleTime.load();bool freshSensor=sampleAt&&now>=sampleAt&&now-sampleAt<200'000'000;
  bool eligible=gamepad&&freshSensor&&settings.GyroEnabled&&(gyroGameButtonSelection(settings,r.availableButtons.load())&buttonMask(id))!=0&&currentGameplay(pc).allowed;
@@ -288,7 +290,7 @@ GameplayState flickGameplay(Object pc,GameplayState animated){
 using AxisInput=bool(*)(Object,const void*,float,float,int,bool);
 AxisInput originalAxis{};
 Object stickOwner{};float stickX{},stickY{};std::uint64_t stickAt{};
-FlickStickProcessor flick;std::uint64_t lastFlickFrame{};
+FlickStickProcessor flick;std::uint64_t lastFlickFrame{},flickGeneration{};
 bool inputAxis(Object pc,const void* key,float value,float dt,int samples,bool gamepad){
  auto& r=*runtime;
  if(key&&reflectionReady.load(std::memory_order_acquire)&&b.is(pc,b.pcClass)&&b.local(pc)){
@@ -296,7 +298,8 @@ bool inputAxis(Object pc,const void* key,float value,float dt,int samples,bool g
   bool horizontal=keyName==read<Bindings::Name>(const_cast<void*>(b.rightX),0);
   bool vertical=keyName==read<Bindings::Name>(const_cast<void*>(b.rightY),0);
   if(horizontal||vertical){
-   if(stickOwner!=pc){stickOwner=pc;stickX=stickY=0;flick.reset();}
+   auto generation=r.deviceGeneration.load(std::memory_order_acquire);
+   if(stickOwner!=pc||flickGeneration!=generation){stickOwner=pc;flickGeneration=generation;stickX=stickY=0;stickAt=0;flick.reset();}
    if(horizontal)stickX=value;else stickY=flickVerticalFromGameAxis(value);stickAt=monotonicNs();r.flickX=stickX;r.flickY=stickY;
    auto settings=r.snapshot();
    if(flick.observeGameplay(settings.FlickStick,flickGameplay(pc,currentGameplay(pc)))){value=0;++r.flickSuppressed;}
@@ -322,6 +325,8 @@ void rotation(Object pc,float dt){
     bool consume=allowed&&settings.GyroEnabled&&gyroAimModeAllows(settings.ActivationMode,game.aimInputHeld)&&r.sensorActive.load(std::memory_order_acquire)&&(now-r.sampleTime.load(std::memory_order_acquire))<100'000'000;
     auto delta=r.queue.consume(now,consume,r.motionEpoch.load(std::memory_order_acquire));
     if(!allowed||!settings.GyroEnabled||gatedBinding!=gyroGameButtonSelection(settings,r.availableButtons.load())||now-r.sampleTime.load()>200'000'000)for(auto& gate:buttonGates)gate.cancel();
+    auto generation=r.deviceGeneration.load(std::memory_order_acquire);
+    if(flickGeneration!=generation){flickGeneration=generation;stickX=stickY=0;stickAt=0;flick.reset();}
     if(lastFlickFrame&&now-lastFlickFrame>250'000'000)flick.reset();lastFlickFrame=now;
     // UE may stop sending unchanged zero axes. A released stick must finish its timed flick.
     bool freshStick=stickOwner==pc&&now>=stickAt&&(now-stickAt<200'000'000||std::hypot(stickX,stickY)<0.65f);
@@ -392,9 +397,26 @@ bool installBindings(Runtime& r){
         {L"Returnal-Slate-Win64-Shipping.dll","de6bd8145e1dd6f66db9ca16049cc5074251a7a829a60a08dc84b9101a290523"},
         {L"Returnal-InputCore-Win64-Shipping.dll","4547c64c1805a7f97cb359b2b437e2f9d2e1407e477748de00130e98a63443f9"},
         {L"Returnal-Core-Win64-Shipping.dll","ac7a32452dab0a2ba20690cc27b68a8a5772d7ddcff175130cb6f69ef18b91e6"},
-        {L"Returnal-UMG-Win64-Shipping.dll","b9b7c4575fbf37cb9efafe1a41d201d2d2b2c0918f47216ad5d3efefe8ce7a46"}};
+        {L"Returnal-UMG-Win64-Shipping.dll","b9b7c4575fbf37cb9efafe1a41d201d2d2b2c0918f47216ad5d3efefe8ce7a46"},
+        {L"Returnal-WinDualSense-Win64-Shipping.dll","6fada9b5ed922e0fdfe80dad0f64188a7a7f99278a5049a673af534bd495dc9b"},
+        {L"Returnal-WinDualShock-Win64-Shipping.dll","3757e6cf104f8ce922e68c29bb81aa0d82363b6fae0b72ec76afb4c9febbeb6d"}};
     for(int attempt=0;attempt<600;++attempt){bool all=true;for(auto& profile:profiles)if(!module(profile.module))all=false;if(all)break;Sleep(100);}
     for(auto& profile:profiles)if(!module(profile.module)||digest(module(profile.module))!=profile.hash){r.log("Unsupported module SHA-256; no game hooks installed");return false;}
+    auto senseModule=module(L"Returnal-WinDualSense-Win64-Shipping.dll"),shockModule=module(L"Returnal-WinDualShock-Win64-Shipping.dll");
+    auto senseEvents=reinterpret_cast<unsigned char*>(senseModule)+0x6000;
+    auto shockEvents=reinterpret_cast<unsigned char*>(shockModule)+0x3290;
+    // IInputDevice vtable slot 2 = SendControllerEvents; validate both the slot
+    // and entry instructions in addition to each module's complete SHA-256.
+    void* senseSlot{};void* shockSlot{};
+    std::memcpy(&senseSlot,reinterpret_cast<unsigned char*>(senseModule)+0x27f10,8);
+    std::memcpy(&shockSlot,reinterpret_cast<unsigned char*>(shockModule)+0x6a38,8);
+    constexpr unsigned char sensePrefix[]={0x48,0x89,0x5c,0x24,0x20,0x55,0x56,0x57,0x48,0x83,0xec,0x40};
+    constexpr unsigned char shockPrefix[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20};
+    if(senseSlot!=senseEvents||shockSlot!=shockEvents||std::memcmp(senseEvents,sensePrefix,sizeof(sensePrefix))||std::memcmp(shockEvents,shockPrefix,sizeof(shockPrefix)))throw std::runtime_error("Native input dispatch layout changed");
+    auto slate=module(profiles[4].module);
+    auto nativePress=symbol<void*>(slate,"?OnControllerButtonPressed@FSlateApplication@@UEAA_NVFName@@H_N@Z");
+    auto nativeRelease=symbol<void*>(slate,"?OnControllerButtonReleased@FSlateApplication@@UEAA_NVFName@@H_N@Z");
+    auto nativeAnalog=symbol<void*>(slate,"?OnControllerAnalog@FSlateApplication@@UEAA_NVFName@@HM@Z");
     auto game=module(profiles[0].module),engine=module(profiles[1].module),objects=module(profiles[2].module),input=module(profiles[5].module),core=module(L"Returnal-Core-Win64-Shipping.dll");
     b.makeName=symbol<decltype(b.makeName)>(core,"??0FName@@QEAA@PEB_WW4EFindName@@@Z");
     b.findProperty=symbol<decltype(b.findProperty)>(objects,"?FindPropertyByName@UStruct@@QEBAPEAVFProperty@@VFName@@@Z");
@@ -459,10 +481,20 @@ bool installBindings(Runtime& r){
     auto localVirtualTarget=symbol<void*>(objects,"?execLocalVirtualFunction@UObject@@SAXPEAV1@AEAUFFrame@@QEAX@Z");
     auto mouseTarget=symbol<void*>(module(profiles[4].module),"?ProcessMouseMoveEvent@FSlateApplication@@QEAA_NAEBUFPointerEvent@@_N@Z");
     if(!setTarget||!commitTarget)throw std::runtime_error("Mixed input signatures not unique; no hooks installed");
+    // These native delegates run before/alongside Slate events. Their handlers
+    // update the active controller and recreate Wwise outputs when it changes.
+    auto usageTarget=symbol<void*>(game,"?OnControllerUsageChanged@ATouristPlayerController@@QEAAXHAEBVFString@@@Z");
+    auto connectionTarget=symbol<void*>(game,"?OnControllerConnectionChanged@ATouristPlayerController@@QEAAX_NHH@Z");
+    auto namedConnectionTarget=symbol<void*>(game,"?OnControllerConnectionChangedWithInterfaceName@ATouristPlayerController@@QEAAX_NHAEBVFString@@@Z");
+    constexpr unsigned char usagePrefix[]={0x48,0x89,0x5c,0x24,0x10,0x55,0x56,0x57,0x48,0x83,0xec,0x30};
+    constexpr unsigned char connectionPrefix[]={0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20};
+    constexpr unsigned char namedConnectionPrefix[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x18,0x56,0x57,0x41,0x56};
+    if(std::memcmp(usageTarget,usagePrefix,sizeof(usagePrefix))||std::memcmp(connectionTarget,connectionPrefix,sizeof(connectionPrefix))||std::memcmp(namedConnectionTarget,namedConnectionPrefix,sizeof(namedConnectionPrefix)))throw std::runtime_error("Controller identity notification instructions changed; no hooks installed");
     if(MH_Initialize()!=MH_OK)throw std::runtime_error("MinHook initialization failed");
     std::vector<void*> targets;
     auto create=[&](void* target,void* detour,void** original){if(!hook(target,detour,original))return false;targets.push_back(target);return true;};
     bool ok=create(genericKeyIconTarget,reinterpret_cast<void*>(&genericKeyIcon),reinterpret_cast<void**>(&originalGenericKeyIcon))&&create(keyIconTarget,reinterpret_cast<void*>(&keyIcon),reinterpret_cast<void**>(&originalKeyIcon))&&create(actorTickTarget,reinterpret_cast<void*>(&actorTick),reinterpret_cast<void**>(&originalActorTick))&&create(localVirtualTarget,reinterpret_cast<void*>(&localVirtual),reinterpret_cast<void**>(&originalLocalVirtual))&&create(keyTarget,reinterpret_cast<void*>(&inputKey),reinterpret_cast<void**>(&originalKey))&&create(aimTarget,reinterpret_cast<void*>(&aimTriggerChanged),reinterpret_cast<void**>(&originalAimTrigger))&&create(axisTarget,reinterpret_cast<void*>(&inputAxis),reinterpret_cast<void**>(&originalAxis))&&create(rotationTarget,reinterpret_cast<void*>(&rotation),reinterpret_cast<void**>(&originalRotation))&&create(setTarget,reinterpret_cast<void*>(&setInput),reinterpret_cast<void**>(&originalSet))&&create(commitTarget,reinterpret_cast<void*>(&commitInput),reinterpret_cast<void**>(&originalCommit))&&create(mouseTarget,reinterpret_cast<void*>(&mouseMove),reinterpret_cast<void**>(&originalMouse));
+    if(ok)ok=createNativeInputOwnerHooks(senseEvents,shockEvents,nativePress,nativeRelease,nativeAnalog,usageTarget,connectionTarget,namedConnectionTarget,targets);
     if(!ok){for(auto target:targets)MH_RemoveHook(target);r.log("Hooks rolled back before activation");return false;}
     for(auto target:targets)MH_QueueEnableHook(target);
     if(MH_ApplyQueued()!=MH_OK){r.suspended=true;for(auto target:targets)MH_DisableHook(target);r.log("Hook activation failed; functionality disabled");return false;}
